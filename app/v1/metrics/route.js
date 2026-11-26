@@ -9,7 +9,14 @@ const attrs = (list = []) =>
 
 // Receives OTLP/HTTP JSON metrics from Claude Code.
 export async function POST(req) {
-  if (req.headers.get("authorization") !== `Bearer ${process.env.INGEST_TOKEN}`) {
+  // INGEST_TOKENS="tokenA=shivam,tokenB=pranav": the token decides who the usage belongs to.
+  const bearer = (req.headers.get("authorization") || "").replace(/^Bearer /, "");
+  const tokenUsers = Object.fromEntries(
+    (process.env.INGEST_TOKENS || "").split(",").map((p) => p.trim().split("=")).filter((p) => p[0] && p[1])
+  );
+  const tokenName = Object.prototype.hasOwnProperty.call(tokenUsers, bearer) ? tokenUsers[bearer] : null;
+  const sharedOk = process.env.INGEST_TOKEN && bearer === process.env.INGEST_TOKEN;
+  if (!bearer || (!tokenName && !sharedOk)) {
     return new Response("unauthorized", { status: 401 });
   }
   let body;
@@ -29,7 +36,7 @@ export async function POST(req) {
         if (!kind) continue;
         for (const p of m.sum?.dataPoints || []) {
           const a = { ...res, ...attrs(p.attributes) };
-          const user = a["member.name"] || a["user.email"] || a["user.account_uuid"] || a["user.id"] || "unknown";
+          const user = tokenName || a["member.name"] || a["user.email"] || a["user.account_uuid"] || a["user.id"] || "unknown";
           const model = a.model || "unknown";
           const field = `${user}|${model}|${kind === "cost" ? "cost" : a.type || "other"}`;
           inc[field] = (inc[field] || 0) + Number(p.asDouble ?? p.asInt ?? 0);
