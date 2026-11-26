@@ -46,7 +46,10 @@ async function handle(req) {
   if (machine) {
     for (const [other, raw] of Object.entries(team)) {
       try {
-        if (other !== handle && JSON.parse(raw).machine === machine) await redis.hdel("team", other);
+        if (other === handle) continue;
+        const o = JSON.parse(raw);
+        // same computer, or an older row (made before computer tags existed) with the same name
+        if (o.machine === machine || (!o.machine && o.name === name)) await redis.hdel("team", other);
       } catch {}
     }
   }
