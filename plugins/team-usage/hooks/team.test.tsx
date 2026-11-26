@@ -31,18 +31,17 @@ test('the chip lists everyone who installed, even with no usage, and expands', a
   stub(on, [])
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
   await new Promise(r => (globalThis as any).setTimeout(r, 300))
-  const band = await $.ui.mount({ ...BAND, surface: 'desktop' } as any)
-
-  const chip = await band.find({ type: 'Button', text: /#2\/3/ })
-  expect(chip).toBeDefined() // collapsed: rank, spend, period
-
-  await (band as any).press({ key: 'toggle' })
-  for (const who of ['Shivam', 'Pranav', 'Ketan']) {
-    expect(await band.find({ type: 'Text', text: who })).toBeDefined()
+  for (const surface of ['desktop', 'terminal'] as const) {
+    const band = await $.ui.mount({ ...BAND, surface } as any)
+    expect(await band.find({ type: 'Button', text: /#2\/3/ }), surface + ' collapsed').toBeDefined()
+    await (band as any).press({ key: 'toggle' })
+    const texts = (await band.findAll({ type: 'Text' })).map((t: any) => t.text)
+    for (const want of ['Shivam', 'Pranav', 'Ketan', '← you', 'rename']) {
+      expect(texts.some((t: string) => t.includes(want)), surface + ' missing ' + want + ' in ' + JSON.stringify(texts)).toBe(true)
+    }
+    await (band as any).press({ key: 'toggle' }) // the open state is shared; collapse for the next surface
+    await band.unmount()
   }
-  expect(await band.find({ type: 'Text', text: /← you/ })).toBeDefined()
-  expect(await band.find({ type: 'Text', text: /set your name/ })).toBeDefined()
-  await band.unmount()
 })
 
 test('/team-usage name saves the name on the server', async ($, on) => {

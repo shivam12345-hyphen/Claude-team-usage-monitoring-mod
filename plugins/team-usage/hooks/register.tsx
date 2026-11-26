@@ -18,6 +18,10 @@ const LABEL = { today: 'Today', week: '7 days', month: '30 days' } as const
 const short = (x: number) =>
   x >= 1e6 ? (x / 1e6).toFixed(1) + 'M' : x >= 1e3 ? (x / 1e3).toFixed(1) + 'K' : String(Math.round(x))
 const fresh = (p: Person) => p.input + p.output + p.cacheWrite
+const shown = (name: string, max: number) => {
+  const n = name.includes('@') ? name.split('@')[0] ?? name : name
+  return n.length > max ? n.slice(0, max - 1) + '…' : n
+}
 const money = (x: number) => '$' + x.toFixed(2)
 const bar = (x: number, max: number) => {
   const n = max > 0 && x > 0 ? Math.max(1, Math.round((x / max) * 8)) : 0
@@ -67,7 +71,7 @@ async function refresh($: any) {
     await update($, view, () => ({ team, error: '' }))
     const list = ranked(team.periods.week)
     const rank = list.findIndex(([id]) => id === team.you) + 1
-    $.ui.status(rank ? `Team: you are #${rank} of ${list.length} this week` : 'Team usage')
+    $.ui.status(rank ? `🏆 #${rank}/${list.length} this week` : 'Team usage')
   } catch (e: any) {
     await update($, view, v => ({ ...v, error: String(e?.message || e) }))
   }
@@ -105,7 +109,7 @@ export const register: Register = on => {
     return { text: 'Team usage pane opened.' }
   })
 
-  // The chip above the prompt: one line, click to expand.
+  // The chip above the prompt: one quiet line, click to expand.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const prev = await next(e)
     const v = await read($, view)
@@ -128,38 +132,39 @@ export const register: Register = on => {
       return (
         <Box flexDirection="column">
           {prev}
-          <Button key="toggle" label={label} onPress={() => update($, open, o => !o)} />
+          <Button key="toggle" plain label={label} onPress={() => update($, open, o => !o)} />
         </Box>
       )
     }
 
-    const width = Math.min(14, Math.max(6, ...list.map(([, p]) => p.name.length)))
     return (
-      <Box flexDirection="column">
+      <Box flexDirection="column" paddingX={1} borderStyle="round" borderColor="promptBorder">
         {prev}
         <Box>
-          <Button key="toggle" label={label} onPress={() => update($, open, o => !o)} />
+          <Button key="toggle" plain label={label} onPress={() => update($, open, o => !o)} />
           <Text dimColor>  {list.length} on the team</Text>
         </Box>
-        <Box>
+        <Box gap={2}>
           {(['today', 'week', 'month'] as const).map(k => (
-            <Button key={'p' + k} label={(k === per ? '● ' : '○ ') + LABEL[k] + '   '} onPress={() => update($, period, () => k)} />
+            <Button key={'p' + k} plain dimColor={k !== per} label={(k === per ? '● ' : '○ ') + LABEL[k]} onPress={() => update($, period, () => k)} />
           ))}
         </Box>
         {list.map(([id, p], i) => {
           const isMe = id === team.you
           const online = p.seen > 0 && now - p.seen < ONLINE_MS
           return (
-            <Text bold={isMe}>
-              {'  '}{MEDAL[i] || String(i + 1).padStart(2) + ' '}{' '}{p.name.slice(0, width).padEnd(width)}{' '}
-              {bar(p.cost, top)} {money(p.cost).padStart(7)} · {short(fresh(p)).padStart(6)}
-              {online ? ' ●' : '  '}{isMe ? ' ← you' : ''}
-            </Text>
+            <Box key={'r' + id}>
+              <Box width={3}><Text>{MEDAL[i] || String(i + 1)}</Text></Box>
+              <Box width={15}><Text bold={isMe} color={isMe ? 'claude' : undefined}>{shown(p.name, 14)}</Text></Box>
+              <Box width={10}><Text color="suggestion">{bar(p.cost, top)}</Text></Box>
+              <Box width={8} justifyContent="flex-end"><Text>{money(p.cost)}</Text></Box>
+              <Box width={9} justifyContent="flex-end"><Text dimColor>{short(fresh(p))}</Text></Box>
+              <Box width={3} justifyContent="center"><Text color="success">{online ? '●' : ' '}</Text></Box>
+              <Text color="claude">{isMe ? '← you' : ''}</Text>
+            </Box>
           )
         })}
-        <Text dimColor>
-          {'  '}● online now · tokens are new tokens (cache excluded){team.nameSet ? '' : ' · set your name: /team-usage name <your name>'}
-        </Text>
+        <Text dimColor>{team.nameSet ? '● online now' : '● online now · rename: /team-usage name <your name>'}</Text>
       </Box>
     )
   })
@@ -176,7 +181,7 @@ export const register: Register = on => {
           <Text bold>{label}</Text>
           {list.map(([id, p], i) => (
             <Text bold={id === team.you}>
-              {i + 1}. {p.name}{id === team.you ? ' (you)' : ''}  {money(p.cost)} · {short(fresh(p))} tokens
+              {i + 1}. {shown(p.name, 24)}{id === team.you ? ' (you)' : ''}  {money(p.cost)} · {short(fresh(p))} tokens
             </Text>
           ))}
         </Box>
