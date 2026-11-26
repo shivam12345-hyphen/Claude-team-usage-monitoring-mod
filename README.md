@@ -26,5 +26,5 @@ Paste your personal token when asked, then fully quit and reopen Claude Code.
 ```
 /plugin install team-usage --marketplace shivam12345-hyphen/Claude-team-usage-monitoring-mod
 ```
-Click the chip above the prompt to expand it; `/team-usage` opens the full pane.
+Installing adds you to the team list straight away, even before you have any usage. Click the chip above the prompt to expand it; `/team-usage` opens the full pane, and `/team-usage name <your name>` sets the name teammates see.
 The mod reads the endpoint and token from `~/.claude/settings.json` written by step 2.

@@ -1,3 +1,5 @@
 # team-usage
 
-A pane beside the Claude chat that shows everyone's Claude Code usage for your team: spend and new tokens for today, the last 7 days and the last 30 days, ranked, with your own row marked. It uses the personal token and endpoint you already set up for the team usage dashboard (read from your ~/.claude/settings.json), so there is nothing else to configure. Open it with /team-usage; it refreshes every minute and shows your rank in the status line. Only usage numbers are shared, never prompts or code.
+A small chip above the Claude prompt that shows everyone on your team who has installed this mod, with their Claude Code usage. Click it to expand a ranked leaderboard for today, the last 7 days or the last 30 days: name, spend and new tokens, with a dot for who is online now and your own row marked. Installing the mod adds you to the list straight away, even before you have any usage.
+
+Set the name your teammates see with `/team-usage name <your name>`. Open the full pane with `/team-usage`. The mod reads the team server address and your personal token from `~/.claude/settings.json`, which the team setup script writes, so run that script first. Only usage numbers are shared, never prompts or code.

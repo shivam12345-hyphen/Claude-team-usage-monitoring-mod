@@ -1,1 +1,17 @@
-{ "name": "team-usage", "version": "0.1.0", "description": "A pane beside the chat showing everyone's Claude Code usage on your team, with your own row highlighted.", "types": "./types/index.d.ts" }
+{
+  "name": "team-usage",
+  "version": "0.2.0",
+  "description": "See everyone on your team who has installed this, with their Claude Code usage, in a small expandable chip above the prompt.",
+  "author": {
+    "name": "shivam12345-hyphen"
+  },
+  "license": "MIT",
+  "keywords": [
+    "usage",
+    "team",
+    "leaderboard",
+    "tokens"
+  ],
+  "repository": "https://github.com/shivam12345-hyphen/Claude-team-usage-monitoring-mod",
+  "types": "./types/index.d.ts"
+}
