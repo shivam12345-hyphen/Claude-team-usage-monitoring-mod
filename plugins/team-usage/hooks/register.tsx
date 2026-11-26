@@ -112,19 +112,6 @@ async function scan($: any) {
   return out
 }
 
-// A short, non-reversible tag for this computer, so the server can tell two installs on one Mac are one person.
-function machineTag(text: string) {
-  let h1 = 0xdeadbeef, h2 = 0x41c6ce57
-  for (let i = 0; i < text.length; i++) {
-    const c = text.charCodeAt(i)
-    h1 = Math.imul(h1 ^ c, 2654435761)
-    h2 = Math.imul(h2 ^ c, 1597334677)
-  }
-  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909)
-  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909)
-  return ((h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0'))
-}
-
 const ID_OK = /^[a-zA-Z0-9-]{16,64}$/
 
 // Your id and name live in one small file in ~/.claude, so every copy of the mod on this computer is one person.
@@ -148,7 +135,7 @@ async function identity($: any) {
   }
   await $.store.set('id', id)
   await $.store.set('name', name)
-  return { id, name, fileLogin: String(saved.login ?? ''), machine: machineTag(`${home}|${user}`) }
+  return { id, name, fileLogin: String(saved.login ?? '') }
 }
 
 // Rewrites the shared file, keeping every other field in it (such as a login put there by a setup prompt).
@@ -182,7 +169,7 @@ async function refresh($: any) {
 // Sends your totals, then reads back the whole team.
 async function refreshOnce($: any) {
   try {
-    const { id, name, machine, fileLogin } = await identity($)
+    const { id, name, fileLogin } = await identity($)
     // The login comes from `/team-usage login`, or from the shared file (so a setup prompt can put it there).
     const login = String((await $.store.get('login')) ?? '') || fileLogin
     const at = login.indexOf(':')
@@ -192,7 +179,7 @@ async function refreshOnce($: any) {
     const post = await $.http.fetch(`${SERVER}/api/sync`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...auth },
-      body: JSON.stringify({ id, name, machine, usage }),
+      body: JSON.stringify({ id, name, usage }),
     })
     if (post.status === 401) throw new Error(WRONG_LOGIN)
     if (!post.ok) throw new Error(`The team server answered ${post.status}.`)

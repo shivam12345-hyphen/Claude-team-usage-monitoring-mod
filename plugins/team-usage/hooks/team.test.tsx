@@ -77,7 +77,7 @@ test('a sync sends only a random id, a name and token totals, never any text', a
   await wait()
   const body = posts[0] ?? '{}'
   const sent = JSON.parse(body)
-  expect(Object.keys(sent).sort()).toEqual(['id', 'machine', 'name', 'usage'])
+  expect(Object.keys(sent).sort()).toEqual(['id', 'name', 'usage'])
   expect(sent.id).toMatch(/^[0-9a-f]{32}$/)
   expect(sent.name).toBe('shivam')
   // m1 appears twice (counted once) and m2 is five days old: 1000+200+100 today, +500+50+100 in the week
@@ -140,7 +140,6 @@ test('every copy of the mod on one computer is one person (shared id file)', asy
   const sent = JSON.parse(posts[0] ?? '{}')
   expect(sent.id).toBe('f'.repeat(32))
   expect(sent.name).toBe('Shivam K')
-  expect(sent.machine).toMatch(/^[0-9a-f]{16}$/)
 })
 
 test('a first run creates the id file, and a rename updates it', async ($, on) => {
