@@ -27,7 +27,7 @@ async function handle() {
         await redis.hdel("team", handle);
         continue;
       }
-      members.push({ handle, name: m.name, seen: m.seen, today: m.today, week: m.week, month: m.month });
+      members.push({ handle, name: String(m.name ?? "").replace(/[^\p{L}\p{N} ._'-]/gu, "").trim().slice(0, 24) || "anonymous", seen: m.seen, today: m.today, week: m.week, month: m.month });
     } catch {}
   }
   return Response.json({ updated: now, members });

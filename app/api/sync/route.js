@@ -31,7 +31,7 @@ async function handle(req) {
   }
   const id = String(body?.id ?? "");
   if (!/^[a-zA-Z0-9-]{16,64}$/.test(id)) return Response.json({ error: "bad id" }, { status: 400 });
-  const name = String(body?.name ?? "").replace(/[\u0000-\u001f]/g, "").trim().slice(0, 24) || "anonymous";
+  const name = String(body?.name ?? "").replace(/[^\p{L}\p{N} ._'-]/gu, "").trim().slice(0, 24) || "anonymous";
   const handle = createHash("sha256").update(id).digest("hex").slice(0, 10);
 
   const team = await redis.hgetall("team");
