@@ -62,9 +62,12 @@ async function scan($: any) {
   const now = await $.clock.now()
   const out = { today: empty(), week: empty(), month: empty() }
   const seen = new Set<string>()
-  const dirs = await $.fs.list(root).catch(() => [])
+  const counted = new Set<string>() // the same message can sit in several transcripts (resumed or forked sessions)
+  const dirs = await $.fs.list(root).catch((e: any) => {
+    throw new Error(`Cannot read ${root}: ${String(e?.message || e)}`)
+  })
   for (const d of dirs) {
-    if (d.kind !== 'directory') continue
+    if (d.kind !== 'dir') continue
     const entries = await $.fs.list(`${root}/${d.name}`).catch(() => [])
     for (const f of entries) {
       if (f.kind !== 'file' || !f.name.endsWith('.jsonl') || now - f.mtimeMs > 31 * DAY) continue
@@ -85,9 +88,10 @@ async function scan($: any) {
         entry = { sig, msgs }
         files.set(path, entry)
       }
-      for (const m of entry.msgs.values()) {
+      for (const [key, m] of entry.msgs) {
         const age = now - m.t
-        if (age > 30 * DAY) continue
+        if (age > 30 * DAY || counted.has(key)) continue
+        counted.add(key)
         const add = (b: Bucket) => {
           b.input += m.i; b.output += m.o; b.cacheWrite += m.cw; b.cacheRead += m.cr; b.messages += 1
         }
