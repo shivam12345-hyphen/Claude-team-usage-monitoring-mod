@@ -1,23 +1,29 @@
 # Claude team usage
 
-A small chip above the Claude prompt showing everyone on your team who has installed it, ranked by how much
-Claude Code they used (today, 7 or 30 days). No tokens, no passwords, no telemetry setup: install the mod and you are on the list.
+A small chip above the Claude prompt that ranks everyone on your team by Claude Code token usage
+(today, 7 or 30 days). No server, no tokens, no accounts: the team shares one folder it already syncs.
 
 ## Install (each person, in the Claude desktop app or Claude Code)
 ```
 /plugin install team-usage --marketplace shivam12345-hyphen/Claude-team-usage-monitoring-mod
 ```
-Then use Claude Code as normal. Click the chip above the prompt to expand it.
-Set the name teammates see with `/team-usage name <your name>` (it defaults to your computer username).
 
-## How it works
-The mod adds up your own usage from the transcripts Claude Code already keeps on your computer, and sends only
-your name and token totals to a small server in this repo (`/api/sync`), stored in Redis. It reads everyone's totals back
-from `/api/team`. Prompts, code and file names never leave your machine.
+## Connect your team (once per person)
+1. Create or pick a folder everyone on the team can open in a synced drive (Google Drive, Dropbox, iCloud, OneDrive).
+   Share it only with your team.
+2. Point the mod at it, using the folder's path on your computer, for example:
+   ```
+   /team-usage folder ~/Google Drive/Claude usage
+   ```
+3. Optional: choose the name teammates see (defaults to your computer username):
+   ```
+   /team-usage name Pranav K
+   ```
+Click the chip above the prompt to expand it. `/team-usage` opens the full pane.
 
-The server is open: it has no login, so anyone with the URL can read the list or add an entry. Each install uses a
-random id (stored only on your machine; the server keeps just its hash), so nobody else can change your row.
-Counts are new tokens (input, output and cache writes). Cache reads are left out.
-
-## Deploy the server (once)
-Import this repo in Vercel and add **Upstash Redis** (it provides `REDIS_URL`). No other settings are needed.
+## What is shared, and what is not
+The mod adds up usage numbers from the transcripts Claude Code keeps on your computer, and writes one small file,
+`claude-usage-<id>.json`, into the shared folder. It contains only your name and token counts (input, output and
+cache) for today, 7 days and 30 days. It never stores or sends prompts, code, file names or answers, and it reads only
+files named `claude-usage-*.json` in the shared folder. Counts are new tokens (input, output and cache writes); cache
+reads are left out. Who can see the numbers is decided by who the folder is shared with.

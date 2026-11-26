@@ -1,7 +1,7 @@
 {
   "name": "team-usage",
-  "version": "0.3.0",
-  "description": "See everyone on your team who has installed this, ranked by Claude Code usage, in a small expandable chip above the prompt. No tokens or setup.",
+  "version": "0.4.0",
+  "description": "A small chip above the prompt that ranks everyone on your team by Claude Code token usage, shared through a team folder you already sync. No server, no tokens.",
   "author": {
     "name": "shivam12345-hyphen"
   },
