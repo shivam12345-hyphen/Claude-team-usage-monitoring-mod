@@ -3,18 +3,16 @@ import type { Register } from 'claude-code'
 
 import type { Bucket, Member, Team } from '../types'
 
-// Sharing happens through one folder the whole team already syncs (Drive, Dropbox, iCloud...).
-// Each install writes ONE small file there with only a name and token totals, and reads the others.
-const FILE = /^claude-usage-[a-f0-9]{12}\.json$/
-const STALE_MS = 35 * DAY_MS()
+// The shared team server: it stores only each person's name and token totals.
+// If you host your own copy, change this address.
+const SERVER = 'https://claudeusage-mocha.vercel.app'
 const PANE = 'team-usage'
 const ONLINE_MS = 10 * 60 * 1000
 const DAY = 864e5
-function DAY_MS() { return 864e5 }
 const CHUNK = 3 * 1024 * 1024
 
 const view = atom({ plugin: 'team-usage', key: 'view' } as const, { team: null, error: '' }, {
-  shape: 'view-4',
+  shape: 'view-5',
 })
 const open = atom({ plugin: 'team-usage', key: 'open' } as const, false)
 const period = atom({ plugin: 'team-usage', key: 'period' } as const, 'week')
@@ -119,63 +117,25 @@ async function identity($: any) {
   return { id, name }
 }
 
-const num = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) && x >= 0 ? Math.min(x, 1e12) : 0)
-const cleanBucket = (b: any): Bucket => ({
-  input: num(b?.input), output: num(b?.output), cacheWrite: num(b?.cacheWrite), cacheRead: num(b?.cacheRead), messages: num(b?.messages),
-})
-
-// Files other people wrote are untrusted: only numbers and a short plain name are ever taken from them.
-function readMember(handle: string, text: string, now: number): Member | null {
-  try {
-    const j = JSON.parse(text)
-    const seen = typeof j?.seen === 'number' && Number.isFinite(j.seen) && j.seen > 0 && j.seen <= now + DAY ? j.seen : 0
-    if (!seen || now - seen > STALE_MS) return null
-    const name = String(j?.name ?? '').replace(/[^\p{L}\p{N} ._'-]/gu, '').trim().slice(0, 24) || 'anonymous'
-    return { handle, name, seen, today: cleanBucket(j.today), week: cleanBucket(j.week), month: cleanBucket(j.month) }
-  } catch {
-    return null
-  }
-}
-
-async function folderPath($: any): Promise<string> {
-  const raw = String((await $.store.get('folder')) ?? '')
-  if (!raw) return ''
-  const home = await $.env.get('HOME')
-  return raw.replace(/^~(?=\/|$)/, String(home ?? '')).replace(/\/+$/, '')
-}
-
-// Measures your usage, publishes your one file, reads everyone else's.
+// Sends your totals, then reads back the whole team.
 async function refresh($: any) {
   try {
     const { id, name } = await identity($)
-    const handle = id.slice(0, 12)
     const usage = await scan($)
-    const now = await $.clock.now()
-    const me: Member = { handle, name, seen: now, ...usage }
-    const members: Member[] = [me]
-    const folder = await folderPath($)
-    let error = ''
-    if (folder) {
-      try {
-        await $.fs.write(`${folder}/claude-usage-${handle}.json`, JSON.stringify({ v: 1, name, seen: now, ...usage }))
-        const entries = await $.fs.list(folder)
-        for (const f of entries) {
-          if (f.kind !== 'file' || !FILE.test(f.name) || f.size > 20000) continue
-          const other = f.name.slice('claude-usage-'.length, -'.json'.length)
-          if (other === handle) continue
-          const text = await $.fs.read(`${folder}/${f.name}`).catch(() => '')
-          const m = readMember(other, String(text), now)
-          if (m) members.push(m)
-        }
-      } catch (e: any) {
-        error = `Shared folder problem: ${String(e?.message || e)}`
-      }
-    }
-    const team: Team = { you: handle, members, shared: Boolean(folder) }
-    await update($, view, () => ({ team, error }))
+    const post = await $.http.fetch(`${SERVER}/api/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, name, usage }),
+    })
+    if (!post.ok) throw new Error(`The team server answered ${post.status}.`)
+    const you = String(JSON.parse(post.text).you)
+    const res = await $.http.fetch(`${SERVER}/api/team`)
+    if (!res.ok) throw new Error(`The team server answered ${res.status}.`)
+    const members: Member[] = JSON.parse(res.text).members
+    await update($, view, () => ({ team: { you, members, shared: true }, error: '' }))
     const list = ranked(members, 'week')
-    const rank = list.findIndex(m => m.handle === handle) + 1
-    $.ui.status(folder ? `Team #${rank}/${list.length} this week` : 'Team usage: set a shared folder')
+    const rank = list.findIndex(m => m.handle === you) + 1
+    $.ui.status(rank ? `Team #${rank}/${list.length} this week` : 'Team usage')
   } catch (e: any) {
     await update($, view, v => ({ ...v, error: String(e?.message || e) }))
   }
@@ -185,7 +145,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'team-usage',
-      description: "Team usage. '/team-usage folder <path>' picks the shared folder, '/team-usage name <name>' renames you",
+      description: "Team usage. '/team-usage name <your name>' sets the name others see",
     })
     void $.ui.open({ id: PANE, title: 'Team usage' })
     void refresh($)
@@ -202,16 +162,8 @@ export const register: Register = on => {
       await refresh($)
       return { text: `Done. Your teammates now see you as "${name}".` }
     }
-    const f = args.match(/^folder\s+(.+)$/i)
-    if (f) {
-      const path = (f[1] ?? '').trim().replace(/^["']|["']$/g, '')
-      await $.store.set('folder', path)
-      await refresh($)
-      const v = await read($, view)
-      return { text: v.error ? v.error : `Shared folder set to ${path}. Your teammates appear once they set the same folder.` }
-    }
     if (args && args !== 'open') {
-      return { text: 'Use /team-usage to open the pane, /team-usage name <your name> to rename, or /team-usage folder <path> to choose the shared team folder.' }
+      return { text: 'Use /team-usage to open the pane, or /team-usage name <your name> to change your name.' }
     }
     await $.ui.open({ id: PANE, title: 'Team usage' })
     void refresh($)
@@ -272,7 +224,7 @@ export const register: Register = on => {
             </Box>
           )
         })}
-        <Text dimColor>{team.shared ? '● online now · new tokens (cache excluded) · /team-usage name <your name>' : 'Alone for now. Share a team folder: /team-usage folder <path>'}</Text>
+        <Text dimColor>{v.error ? 'Offline: ' + v.error : '● online now · new tokens (cache excluded) · /team-usage name <your name>'}</Text>
       </Box>
     )
   })

@@ -1,22 +1,22 @@
 import { expect, test } from 'claude-code/testing'
 
 const B = (tokens: number) => ({ input: tokens, output: 0, cacheWrite: 0, cacheRead: 0, messages: 1 })
-const file = (name: string, tokens: number) =>
-  JSON.stringify({ v: 1, name, seen: Date.now(), today: B(tokens), week: B(tokens), month: B(tokens) })
-
-const FOLDER = '/team'
-const others: Record<string, string> = {
-  'claude-usage-aaaaaaaaaaaa.json': file('Pranav', 27000),
-  'claude-usage-bbbbbbbbbbbb.json': file('Ketan', 0),
-  'claude-usage-cccccccccccc.json': file('<script>Evil</script>', 5), // hostile name is cleaned
-  'claude-usage-dddddddddddd.json': '{not json', // ignored
-  'notes.txt': 'secrets', // never read
-}
+const member = (handle: string, name: string, tokens: number) => ({
+  handle, name, seen: Date.now(), today: B(tokens), week: B(tokens), month: B(tokens),
+})
+const members = [member('aaa', 'Pranav', 27000), member('bbb', 'Shivam', 1950), member('ccc', 'Ketan', 0)]
 
 const BAND = { plugin: 'team-usage', component: 'AbovePrompt', props: { hasSurvey: false } } as const
 
-function stub(on: any, writes: Record<string, string>, reads: string[], folder = FOLDER) {
-  const store: Record<string, unknown> = folder ? { folder } : {}
+const line = (id: string, input: number, output: number, ts: number) =>
+  JSON.stringify({
+    type: 'assistant', timestamp: new Date(ts).toISOString(), text: 'SECRET PROMPT',
+    message: { id, model: 'm', usage: { input_tokens: input, output_tokens: output, cache_creation_input_tokens: 100, cache_read_input_tokens: 9999 } },
+  })
+const transcript = [line('m1', 1000, 200, Date.now() - 1000), line('m1', 1000, 200, Date.now() - 900), line('m2', 500, 50, Date.now() - 5 * 864e5), 'not json'].join('\n')
+
+function stub(on: any, posts: string[]) {
+  const store: Record<string, unknown> = {}
   on('clock.now', () => ({ value: Date.now() }))
   on('clock.every', () => ({ value: undefined }))
   on('ui.status', () => ({ value: undefined }))
@@ -27,75 +27,64 @@ function stub(on: any, writes: Record<string, string>, reads: string[], folder =
   on('env.get', (_: any, e: any) => ({ value: e.name === 'HOME' ? '/home/x' : 'shivam' }))
   on('store.get', (_: any, e: any) => ({ value: store[e.key] }))
   on('store.set', (_: any, e: any) => { store[e.key] = e.value; return { value: undefined } })
-  on('fs.write', (_: any, e: any) => { writes[e.path] = e.text; return { value: undefined } })
-  const line = (id: string, input: number, output: number, ts: number) =>
-    JSON.stringify({ type: 'assistant', timestamp: new Date(ts).toISOString(), message: { id, model: 'm', usage: { input_tokens: input, output_tokens: output, cache_creation_input_tokens: 100, cache_read_input_tokens: 9999 } }, text: 'SECRET PROMPT' })
-  const transcript = [line('m1', 1000, 200, Date.now() - 1000), line('m1', 1000, 200, Date.now() - 900), line('m2', 500, 50, Date.now() - 5 * 864e5), 'not json'].join('\n')
   on('fs.list', (_: any, e: any) => ({
-    value: e.path === FOLDER
-      ? Object.entries(others).map(([name, t]) => ({ name, kind: 'file', size: t.length, mtimeMs: 0, isLink: false }))
-      : e.path === '/home/x/.claude/projects'
-        ? [{ name: 'proj', kind: 'dir', size: 0, mtimeMs: 0, isLink: false }]
-        : e.path === '/home/x/.claude/projects/proj'
-          ? [{ name: 's.jsonl', kind: 'file', size: transcript.length, mtimeMs: Date.now(), isLink: false }]
-          : [],
+    value: e.path === '/home/x/.claude/projects'
+      ? [{ name: 'proj', kind: 'dir', size: 0, mtimeMs: 0, isLink: false }]
+      : e.path === '/home/x/.claude/projects/proj'
+        ? [{ name: 's.jsonl', kind: 'file', size: transcript.length, mtimeMs: Date.now(), isLink: false }]
+        : [],
   }))
-  on('fs.read', (_: any, e: any) => {
-    reads.push(e.path)
-    return { value: String(e.path).endsWith('s.jsonl') ? transcript : others[String(e.path).split('/').pop() ?? ''] ?? '' }
+  on('fs.read', () => ({ value: transcript }))
+  on('http.fetch', (_: any, e: any) => {
+    if (e.init?.method === 'POST') {
+      posts.push(e.init.body)
+      return { value: { status: 200, ok: true, headers: {}, text: '{"you":"bbb"}' } }
+    }
+    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ members }) } }
   })
 }
 
 const wait = () => new Promise(r => (globalThis as any).setTimeout(r, 300))
 
-test('everyone with a file in the shared folder is listed, hostile files are cleaned', async ($, on) => {
-  const writes: Record<string, string> = {}
-  const reads: string[] = []
-  stub(on, writes, reads)
+test('the chip lists everyone who installed, even with no usage, and expands', async ($, on) => {
+  stub(on, [])
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
   await wait()
-
   for (const surface of ['desktop', 'terminal'] as const) {
     const band = await $.ui.mount({ ...BAND, surface } as any)
-    expect(await band.find({ type: 'Button', text: /#2\/4/ }), surface + ' collapsed').toBeDefined()
+    expect(await band.find({ type: 'Button', text: /#2\/3/ }), surface + ' collapsed').toBeDefined()
     await (band as any).press({ key: 'toggle' })
     const texts = (await band.findAll({ type: 'Text' })).map((t: any) => t.text)
-    for (const want of ['Pranav', 'Ketan', 'shivam', '← you', 'scriptEvilscr']) {
+    for (const want of ['Pranav', 'Shivam', 'Ketan', '← you', 'team-usage name']) {
       expect(texts.some((t: string) => t.includes(want)), surface + ' missing ' + want + ' in ' + JSON.stringify(texts)).toBe(true)
     }
-    expect(texts.some((t: string) => t.includes('<'.concat('script'))), 'html survived').toBe(false)
     await (band as any).press({ key: 'toggle' })
     await band.unmount()
   }
-  expect(reads.filter(p => !p.endsWith('s.jsonl')).every(p => /claude-usage-[a-f0-9]{12}\.json$/.test(p)), 'read an unrelated file: ' + reads.join()).toBe(true)
 })
 
-test('my file holds only a name and token totals', async ($, on) => {
-  const writes: Record<string, string> = {}
-  stub(on, writes, [])
+test('a sync sends only a random id, a name and token totals, never any text', async ($, on) => {
+  const posts: string[] = []
+  stub(on, posts)
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
   await wait()
-  const [path, text] = Object.entries(writes)[0] ?? ['', '']
-  expect(path).toMatch(/^\/team\/claude-usage-[a-f0-9]{12}\.json$/)
-  const j = JSON.parse(text)
-  expect(Object.keys(j).sort()).toEqual(['month', 'name', 'seen', 'today', 'v', 'week'])
-  expect(j.name).toBe('shivam')
-  // the transcript has m1 twice (counted once) and m2 five days ago: 1000+200+100, then +500+50+100 in the week
-  expect(j.today.input + j.today.output + j.today.cacheWrite).toBe(1300)
-  expect(j.week.input + j.week.output + j.week.cacheWrite).toBe(1950)
-  expect(j.week.cacheRead).toBe(19998)
-  expect(text).not.toContain('SECRET')
+  const body = posts[0] ?? '{}'
+  const sent = JSON.parse(body)
+  expect(Object.keys(sent).sort()).toEqual(['id', 'name', 'usage'])
+  expect(sent.id).toMatch(/^[0-9a-f]{32}$/)
+  expect(sent.name).toBe('shivam')
+  // m1 appears twice (counted once) and m2 is five days old: 1000+200+100 today, +500+50+100 in the week
+  expect(sent.usage.today.input + sent.usage.today.output + sent.usage.today.cacheWrite).toBe(1300)
+  expect(sent.usage.week.input + sent.usage.week.output + sent.usage.week.cacheWrite).toBe(1950)
+  expect(sent.usage.week.cacheRead).toBe(19998)
+  expect(body).not.toContain('SECRET')
 })
 
-test('with no folder set nothing is written and the chip says so', async ($, on) => {
-  const writes: Record<string, string> = {}
-  stub(on, writes, [], '')
+test('/team-usage name changes the name that is sent', async ($, on) => {
+  const posts: string[] = []
+  stub(on, posts)
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
-  await wait()
-  expect(Object.keys(writes)).toEqual([])
-  const band = await $.ui.mount({ ...BAND, surface: 'desktop' } as any)
-  await (band as any).press({ key: 'toggle' })
-  const texts = (await band.findAll({ type: 'Text' })).map((t: any) => t.text)
-  expect(texts.some((t: string) => t.includes('/team-usage folder'))).toBe(true)
-  await band.unmount()
+  const ran = await $.command.run({ command: 'team-usage', args: 'name Pranav K' } as any)
+  expect(JSON.stringify(ran)).toContain('Pranav K')
+  expect(posts.some(p => JSON.parse(p).name === 'Pranav K')).toBe(true)
 })
