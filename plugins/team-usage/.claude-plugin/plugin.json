@@ -1,0 +1,1 @@
+{ "name": "team-usage", "version": "0.1.0", "description": "A pane beside the chat showing everyone's Claude Code usage on your team, with your own row highlighted.", "types": "./types/index.d.ts" }

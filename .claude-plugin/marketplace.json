@@ -1,0 +1,7 @@
+{
+  "name": "claude-team-usage",
+  "owner": { "name": "shivam12345-hyphen" },
+  "plugins": [
+    { "name": "team-usage", "source": "./plugins/team-usage", "description": "A small expandable chip in Claude showing everyone's Claude Code usage on your team." }
+  ]
+}

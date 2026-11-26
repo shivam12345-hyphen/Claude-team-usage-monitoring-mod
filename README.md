@@ -1,26 +1,30 @@
-# Claude usage tracker
+# Claude team usage
 
-Receives Claude Code OpenTelemetry metrics from your team and shows per-person
-token usage and estimated spend. Covers Claude Code only (not claude.ai chat).
+Shows how much each person on a team uses Claude Code, inside Claude itself: a small
+chip above the prompt that expands into a ranked leaderboard (today, 7 days, 30 days).
+Only usage numbers and estimated cost are tracked, never prompts or code. Covers Claude
+Code only, not claude.ai chat.
 
-## 1. Deploy
-1. Push this folder to a GitHub repo and import it in Vercel (or run `vercel` in this folder).
-2. In the Vercel project: Storage / Marketplace -> add **Upstash Redis** and connect it to the project.
-3. Add environment variables:
-   - `INGEST_TOKEN`  a long random string (teammates' Claude Code uses it)
-   - `DASH_PASSWORD` the password for the dashboard
-4. Redeploy.
+How it works: each person's Claude Code sends its usage to a small server in this repo
+(`/v1/metrics`), stored in Redis. The mod reads it back from `/api/usage`. Each person has
+a personal token, so usage is attributed by token even when people share one Claude account.
 
-## 2. Point Claude Code at it (each teammate, or via managed settings)
+## 1. Deploy (once)
+1. Import this repo in Vercel and add **Upstash Redis** (provides `REDIS_URL`).
+2. Add env var `INGEST_TOKENS`: `token1=shivam,token2=pranav,...` (make tokens with `openssl rand -hex 24`).
+3. Optional: `HIDE_USERS` (comma list to hide) and `USER_ALIASES` (`old=new` renames).
+4. Redeploy. Edit `INGEST_TOKENS` and redeploy any time to add or remove people.
+
+## 2. Each person: set up telemetry (Mac)
 ```bash
-export CLAUDE_CODE_ENABLE_TELEMETRY=1
-export OTEL_METRICS_EXPORTER=otlp
-export OTEL_EXPORTER_OTLP_PROTOCOL=http/json
-export OTEL_EXPORTER_OTLP_ENDPOINT=https://YOUR-APP.vercel.app
-export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer YOUR_INGEST_TOKEN"
+curl -fsSL https://raw.githubusercontent.com/shivam12345-hyphen/Claude-team-usage-monitoring-mod/main/setup.sh | bash
 ```
-Protocol must be `http/json` (Vercel doesn't accept gRPC). Claude Code appends
-`/v1/metrics` itself.
+Paste your personal token when asked, then fully quit and reopen Claude Code.
+(Windows: `setup.ps1` in PowerShell.)
 
-## 3. View
-Open your Vercel URL. Username is anything, password is `DASH_PASSWORD`.
+## 3. Each person: install the mod (Claude desktop app)
+```
+/plugin install team-usage --marketplace shivam12345-hyphen/Claude-team-usage-monitoring-mod
+```
+Click the chip above the prompt to expand it; `/team-usage` opens the full pane.
+The mod reads the endpoint and token from `~/.claude/settings.json` written by step 2.
