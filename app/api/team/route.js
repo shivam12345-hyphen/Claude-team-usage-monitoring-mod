@@ -1,12 +1,15 @@
 import { redis } from "../../../lib/redis";
+import { guard } from "../../../lib/auth";
 
 export const dynamic = "force-dynamic";
 
 const STALE_MS = 35 * 864e5;
 
 // Everyone who has the mod installed, with their usage totals.
-export async function GET() {
+export async function GET(req) {
   try {
+    const denied = await guard(req);
+    if (denied) return denied;
     return await handle();
   } catch (e) {
     return Response.json({ error: String(e?.message || e) }, { status: 503 });

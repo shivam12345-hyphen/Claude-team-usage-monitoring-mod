@@ -1,7 +1,7 @@
 {
   "name": "team-usage",
-  "version": "0.5.0",
-  "description": "A small chip above the prompt that ranks everyone on your team by Claude Code token usage. Install it and you appear for everyone, with no setup.",
+  "version": "0.6.0",
+  "description": "A small chip above the prompt that ranks everyone on your team by Claude Code token usage. Sign in once with your team login.",
   "author": {
     "name": "shivam12345-hyphen"
   },

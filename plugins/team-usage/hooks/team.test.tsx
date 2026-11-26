@@ -15,8 +15,9 @@ const line = (id: string, input: number, output: number, ts: number) =>
   })
 const transcript = [line('m1', 1000, 200, Date.now() - 1000), line('m1', 1000, 200, Date.now() - 900), line('m2', 500, 50, Date.now() - 5 * 864e5), 'not json'].join('\n')
 
-function stub(on: any, posts: string[]) {
-  const store: Record<string, unknown> = {}
+function stub(on: any, posts: string[], opts: { login?: string; password?: string; fetches?: any[] } = {}) {
+  const store: Record<string, unknown> = 'login' in opts ? (opts.login ? { login: opts.login } : {}) : { login: 'teamuser:test-only-pass' }
+  const password = opts.password ?? 'test-only-pass'
   on('clock.now', () => ({ value: Date.now() }))
   on('clock.every', () => ({ value: undefined }))
   on('ui.status', () => ({ value: undefined }))
@@ -36,6 +37,10 @@ function stub(on: any, posts: string[]) {
   }))
   on('fs.read', () => ({ value: transcript }))
   on('http.fetch', (_: any, e: any) => {
+    opts.fetches?.push(e)
+    if (e.init?.headers?.['x-team-password'] !== password) {
+      return { value: { status: 401, ok: false, headers: {}, text: '{"error":"wrong team username or password"}' } }
+    }
     if (e.init?.method === 'POST') {
       posts.push(e.init.body)
       return { value: { status: 200, ok: true, headers: {}, text: '{"you":"bbb"}' } }
@@ -87,4 +92,39 @@ test('/team-usage name changes the name that is sent', async ($, on) => {
   const ran = await $.command.run({ command: 'team-usage', args: 'name Pranav K' } as any)
   expect(JSON.stringify(ran)).toContain('Pranav K')
   expect(posts.some(p => JSON.parse(p).name === 'Pranav K')).toBe(true)
+})
+
+test('without a login nothing is sent and the chip says how to sign in', async ($, on) => {
+  const fetches: any[] = []
+  stub(on, [], { login: '', fetches })
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await wait()
+  expect(fetches).toEqual([])
+  const band = await $.ui.mount({ ...BAND, surface: 'desktop' } as any)
+  const texts = (await band.findAll({ type: 'Text' })).map((t: any) => t.text)
+  expect(texts.some((t: string) => t.includes('/team-usage login'))).toBe(true)
+  await band.unmount()
+})
+
+test('every request carries the team login, and a wrong password shows how to fix it', async ($, on) => {
+  const fetches: any[] = []
+  stub(on, [], { login: 'teamuser:wrong', fetches })
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await wait()
+  expect(fetches.length).toBeGreaterThan(0)
+  expect(fetches.every(f => f.init.headers['x-team-user'] === 'teamuser')).toBe(true)
+  const band = await $.ui.mount({ ...BAND, surface: 'desktop' } as any)
+  const texts = (await band.findAll({ type: 'Text' })).map((t: any) => t.text)
+  expect(texts.some((t: string) => t.includes('Wrong team username or password'))).toBe(true)
+  await band.unmount()
+})
+
+test('/team-usage login saves the login and joins the team', async ($, on) => {
+  const fetches: any[] = []
+  stub(on, [], { login: '', fetches })
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  const bad = await $.command.run({ command: 'team-usage', args: 'login teamuser nope' } as any)
+  expect(JSON.stringify(bad)).toContain('Wrong team username or password')
+  const good = await $.command.run({ command: 'team-usage', args: 'login teamuser test-only-pass' } as any)
+  expect(JSON.stringify(good)).toContain('Signed in')
 })

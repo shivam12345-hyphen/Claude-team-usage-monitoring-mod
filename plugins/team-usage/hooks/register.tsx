@@ -6,13 +6,15 @@ import type { Bucket, Member, Team } from '../types'
 // The shared team server: it stores only each person's name and token totals.
 // If you host your own copy, change this address.
 const SERVER = 'https://claudeteamusage.vercel.app'
+const SIGN_IN = 'Not signed in. Run: /team-usage login <username> <password>'
+const WRONG_LOGIN = 'Wrong team username or password. Run: /team-usage login <username> <password>'
 const PANE = 'team-usage'
 const ONLINE_MS = 10 * 60 * 1000
 const DAY = 864e5
 const CHUNK = 3 * 1024 * 1024
 
 const view = atom({ plugin: 'team-usage', key: 'view' } as const, { team: null, error: '' }, {
-  shape: 'view-5',
+  shape: 'view-6',
 })
 const open = atom({ plugin: 'team-usage', key: 'open' } as const, false)
 const period = atom({ plugin: 'team-usage', key: 'period' } as const, 'week')
@@ -120,16 +122,22 @@ async function identity($: any) {
 // Sends your totals, then reads back the whole team.
 async function refresh($: any) {
   try {
+    const login = String((await $.store.get('login')) ?? '')
+    const at = login.indexOf(':')
+    if (at < 1) throw new Error(SIGN_IN)
+    const auth = { 'x-team-user': login.slice(0, at), 'x-team-password': login.slice(at + 1) }
     const { id, name } = await identity($)
     const usage = await scan($)
     const post = await $.http.fetch(`${SERVER}/api/sync`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...auth },
       body: JSON.stringify({ id, name, usage }),
     })
+    if (post.status === 401) throw new Error(WRONG_LOGIN)
     if (!post.ok) throw new Error(`The team server answered ${post.status}.`)
     const you = String(JSON.parse(post.text).you)
-    const res = await $.http.fetch(`${SERVER}/api/team`)
+    const res = await $.http.fetch(`${SERVER}/api/team`, { headers: auth })
+    if (res.status === 401) throw new Error(WRONG_LOGIN)
     if (!res.ok) throw new Error(`The team server answered ${res.status}.`)
     const members: Member[] = JSON.parse(res.text).members
     await update($, view, () => ({ team: { you, members, shared: true }, error: '' }))
@@ -145,7 +153,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'team-usage',
-      description: "Team usage. '/team-usage name <your name>' sets the name others see",
+      description: "Team usage. '/team-usage login <user> <password>' signs in, '/team-usage name <name>' renames you",
     })
     void $.ui.open({ id: PANE, title: 'Team usage' })
     void refresh($)
@@ -162,8 +170,21 @@ export const register: Register = on => {
       await refresh($)
       return { text: `Done. Your teammates now see you as "${name}".` }
     }
+    const l = args.match(/^login\s+(\S+)\s+(.+)$/i)
+    if (l) {
+      await $.store.set('login', `${l[1]}:${(l[2] ?? '').trim()}`)
+      await update($, view, () => ({ team: null, error: '' }))
+      await refresh($)
+      const v = await read($, view)
+      return { text: v.team ? 'Signed in. You are now on the team list.' : v.error }
+    }
+    if (/^logout$/i.test(args)) {
+      await $.store.set('login', '')
+      await update($, view, () => ({ team: null, error: SIGN_IN }))
+      return { text: 'Signed out. Your row stays on the server until the team owner removes it.' }
+    }
     if (args && args !== 'open') {
-      return { text: 'Use /team-usage to open the pane, or /team-usage name <your name> to change your name.' }
+      return { text: 'Use /team-usage to open the pane, /team-usage login <username> <password> to sign in, or /team-usage name <your name> to rename.' }
     }
     await $.ui.open({ id: PANE, title: 'Team usage' })
     void refresh($)
@@ -174,7 +195,17 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const prev = await next(e)
     const v = await read($, view)
-    if (!v.team || e.props.hasSurvey) return prev
+    if (e.props.hasSurvey) return prev
+    if (!v.team) {
+      if (!v.error) return prev
+      const { Box: Hb, Text: Ht } = $.ui.resolve(e)
+      return (
+        <Hb flexDirection="column">
+          {prev}
+          <Ht dimColor>Team usage: {v.error}</Ht>
+        </Hb>
+      )
+    }
     const team = v.team
     const { Box, Button, Text } = $.ui.resolve(e)
     const isOpen = await read($, open)

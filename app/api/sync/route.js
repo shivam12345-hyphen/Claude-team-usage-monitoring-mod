@@ -1,5 +1,6 @@
 import { createHash } from "crypto";
 import { redis } from "../../../lib/redis";
+import { guard } from "../../../lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,8 @@ const bucket = (b = {}) => ({
 // only its hash is shown to others, so nobody else can update your row.
 export async function POST(req) {
   try {
+    const denied = await guard(req);
+    if (denied) return denied;
     return await handle(req);
   } catch (e) {
     return Response.json({ error: String(e?.message || e) }, { status: 503 });
