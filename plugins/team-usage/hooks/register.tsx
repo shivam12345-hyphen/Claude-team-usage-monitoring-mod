@@ -132,7 +132,7 @@ async function identity($: any) {
   const home = String((await $.env.get('HOME')) ?? '')
   const user = String((await $.env.get('USER')) ?? '')
   const file = `${home}/.claude/team-usage.json`
-  let saved: { id?: string; name?: string } = {}
+  let saved: { id?: string; name?: string; login?: string } = {}
   try {
     saved = JSON.parse(String(await $.fs.read(file)))
   } catch {}
@@ -143,21 +143,33 @@ async function identity($: any) {
   if (!name) name = String((await $.store.get('name')) ?? '') || user || 'anonymous'
   if (saved.id !== id || saved.name !== name) {
     try {
-      await $.fs.write(file, JSON.stringify({ id, name }))
+      await $.fs.write(file, JSON.stringify({ ...saved, id, name }))
     } catch {}
   }
   await $.store.set('id', id)
   await $.store.set('name', name)
-  return { id, name, machine: machineTag(`${home}|${user}`) }
+  return { id, name, fileLogin: String(saved.login ?? ''), machine: machineTag(`${home}|${user}`) }
+}
+
+// Rewrites the shared file, keeping every other field in it (such as a login put there by a setup prompt).
+async function saveFile($: any, change: Record<string, string | undefined>) {
+  const home = String((await $.env.get('HOME')) ?? '')
+  const file = `${home}/.claude/team-usage.json`
+  let saved: Record<string, string | undefined> = {}
+  try {
+    saved = JSON.parse(String(await $.fs.read(file)))
+  } catch {}
+  const next = { ...saved, ...change }
+  for (const k of Object.keys(next)) if (next[k] === undefined) delete next[k]
+  try {
+    await $.fs.write(file, JSON.stringify(next))
+  } catch {}
 }
 
 async function saveName($: any, name: string) {
-  const { id } = await identity($)
-  const home = String((await $.env.get('HOME')) ?? '')
+  await identity($)
   await $.store.set('name', name)
-  try {
-    await $.fs.write(`${home}/.claude/team-usage.json`, JSON.stringify({ id, name }))
-  } catch {}
+  await saveFile($, { name })
 }
 
 // One refresh at a time, so two starts at once cannot make two ids.
@@ -170,11 +182,12 @@ async function refresh($: any) {
 // Sends your totals, then reads back the whole team.
 async function refreshOnce($: any) {
   try {
-    const login = String((await $.store.get('login')) ?? '')
+    const { id, name, machine, fileLogin } = await identity($)
+    // The login comes from `/team-usage login`, or from the shared file (so a setup prompt can put it there).
+    const login = String((await $.store.get('login')) ?? '') || fileLogin
     const at = login.indexOf(':')
     if (at < 1) throw new Error(SIGN_IN)
     const auth = { 'x-team-user': login.slice(0, at), 'x-team-password': login.slice(at + 1) }
-    const { id, name, machine } = await identity($)
     const usage = await scan($)
     const post = await $.http.fetch(`${SERVER}/api/sync`, {
       method: 'POST',
@@ -221,6 +234,7 @@ export const register: Register = on => {
     const l = args.match(/^login\s+(\S+)\s+(.+)$/i)
     if (l) {
       await $.store.set('login', `${l[1]}:${(l[2] ?? '').trim()}`)
+      await saveFile($, { login: undefined })
       await update($, view, () => ({ team: null, error: '' }))
       await refresh($)
       const v = await read($, view)
@@ -238,6 +252,7 @@ export const register: Register = on => {
     }
     if (/^logout$/i.test(args)) {
       await $.store.set('login', '')
+      await saveFile($, { login: undefined })
       await update($, view, () => ({ team: null, error: SIGN_IN }))
       return { text: 'Signed out. Your row stays on the server until the team owner removes it.' }
     }

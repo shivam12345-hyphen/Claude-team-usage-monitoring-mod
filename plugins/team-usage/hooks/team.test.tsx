@@ -180,3 +180,29 @@ test('the ranking follows plan use, not just input and output', async ($, on) =>
   expect(texts.indexOf('Heavy')).toBeLessThan(texts.indexOf('Light'))
   await band.unmount()
 })
+
+test('a login placed in the shared file signs you in, and a rename keeps it', async ($, on) => {
+  const fetches: any[] = []
+  const file = '/home/x/.claude/team-usage.json'
+  const files: Record<string, string> = { [file]: JSON.stringify({ login: 'teamuser:test-only-pass' }) }
+  stub(on, [], { login: '', fetches, files })
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await wait()
+  expect(fetches.length).toBeGreaterThan(0)
+  expect(fetches.every(f => f.init.headers['x-team-user'] === 'teamuser')).toBe(true)
+  expect(JSON.parse(files[file] ?? '{}').login).toBe('teamuser:test-only-pass')
+  await $.command.run({ command: 'team-usage', args: 'name Pranav K' } as any)
+  const after = JSON.parse(files[file] ?? '{}')
+  expect(after.name).toBe('Pranav K')
+  expect(after.login).toBe('teamuser:test-only-pass')
+})
+
+test('logout removes the login from the file too', async ($, on) => {
+  const file = '/home/x/.claude/team-usage.json'
+  const files: Record<string, string> = { [file]: JSON.stringify({ login: 'teamuser:test-only-pass' }) }
+  stub(on, [], { login: '', files })
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await wait()
+  await $.command.run({ command: 'team-usage', args: 'logout' } as any)
+  expect(JSON.parse(files[file] ?? '{}').login).toBeUndefined()
+})
