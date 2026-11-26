@@ -12,7 +12,6 @@ const view = atom({ plugin: 'team-usage', key: 'view' } as const, { team: null, 
 const open = atom({ plugin: 'team-usage', key: 'open' } as const, false)
 const period = atom({ plugin: 'team-usage', key: 'period' } as const, 'week')
 
-const MEDAL = ['🥇', '🥈', '🥉']
 const LABEL = { today: 'Today', week: '7 days', month: '30 days' } as const
 
 const short = (x: number) =>
@@ -71,7 +70,7 @@ async function refresh($: any) {
     await update($, view, () => ({ team, error: '' }))
     const list = ranked(team.periods.week)
     const rank = list.findIndex(([id]) => id === team.you) + 1
-    $.ui.status(rank ? `🏆 #${rank}/${list.length} this week` : 'Team usage')
+    $.ui.status(rank ? `Team #${rank}/${list.length} this week` : 'Team usage')
   } catch (e: any) {
     await update($, view, v => ({ ...v, error: String(e?.message || e) }))
   }
@@ -125,8 +124,8 @@ export const register: Register = on => {
     const now = Date.now()
 
     const label = isOpen
-      ? '▾ 🏆 Team usage'
-      : `▸ 🏆 ${mine >= 0 ? `#${mine + 1}/${list.length}` : 'Team'}${me ? ` · ${money(me.cost)}` : ''} · ${LABEL[per]}`
+      ? '▾ Team usage'
+      : `▸ Team${mine >= 0 ? ` #${mine + 1}/${list.length}` : ''}${me ? ` · ${money(me.cost)}` : ''} · ${LABEL[per]}`
 
     if (!isOpen) {
       return (
@@ -154,7 +153,7 @@ export const register: Register = on => {
           const online = p.seen > 0 && now - p.seen < ONLINE_MS
           return (
             <Box key={'r' + id}>
-              <Box width={3}><Text>{MEDAL[i] || String(i + 1)}</Text></Box>
+              <Box width={3}><Text dimColor>{String(i + 1)}</Text></Box>
               <Box width={15}><Text bold={isMe} color={isMe ? 'claude' : undefined}>{shown(p.name, 14)}</Text></Box>
               <Box width={10}><Text color="suggestion">{bar(p.cost, top)}</Text></Box>
               <Box width={8} justifyContent="flex-end"><Text>{money(p.cost)}</Text></Box>
