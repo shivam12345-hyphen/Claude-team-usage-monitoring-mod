@@ -16,18 +16,21 @@ export default async function Page({ searchParams }) {
   rows.forEach((h, i) => {
     for (const [field, v] of Object.entries(h || {})) {
       const [user, model, type] = field.split("|");
-      const u = (users[user] ||= { input: 0, output: 0, cache: 0, cost: 0, tokens: 0, models: {} });
+      const u = (users[user] ||= { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, cost: 0, tokens: 0, models: {} });
       const val = Number(v);
       if (type === "cost") { u.cost += val; daily[i] += val; continue; }
       if (type === "input") u.input += val;
       else if (type === "output") u.output += val;
-      else { u.cache += val; continue; } // cache reads/writes are re-sent context, not new usage
+      else if (type === "cacheCreation") u.cacheWrite += val;
+      else if (type === "cacheRead") { u.cacheRead += val; continue; } // re-read context, not new usage
+      else continue;
       u.tokens += val;
       u.models[model] = (u.models[model] || 0) + val;
     }
   });
 
   const list = Object.entries(users).sort((a, b) => b[1][sort] - a[1][sort]);
+  const totalCacheRead = list.reduce((s, [, u]) => s + u.cacheRead, 0);
   const totalCost = list.reduce((s, [, u]) => s + u.cost, 0);
   const totalTokens = list.reduce((s, [, u]) => s + u.tokens, 0);
   const top = list[0]?.[1][sort] || 1;
@@ -48,7 +51,7 @@ export default async function Page({ searchParams }) {
 
       <section className="stats">
         <div><b>${totalCost.toFixed(2)}</b><span>estimated spend</span></div>
-        <div><b>{short(totalTokens)}</b><span>input + output tokens</span></div>
+        <div><b>{short(totalTokens)}</b><span>new tokens · {short(totalCacheRead)} cache reads</span></div>
         <div><b>{list.length}</b><span>active {list.length === 1 ? "person" : "people"}</span></div>
         <div><b>${list.length ? (totalCost / list.length).toFixed(2) : "0.00"}</b><span>average per person</span></div>
       </section>
@@ -86,7 +89,7 @@ export default async function Page({ searchParams }) {
           <div className="wrap">
             <table>
               <thead>
-                <tr><th>Person</th><th className="r">Spend</th><th className="r">Share</th><th className="r">Input</th><th className="r">Output</th><th className="r">Cache</th><th>Models</th></tr>
+                <tr><th>Person</th><th className="r">Spend</th><th className="r">Share</th><th className="r">Input</th><th className="r">Output</th><th className="r">Cache write</th><th className="r">Cache read</th><th>Models</th></tr>
               </thead>
               <tbody>
                 {list.map(([user, u]) => (
@@ -96,7 +99,8 @@ export default async function Page({ searchParams }) {
                     <td className="r">{totalCost ? Math.round((u.cost / totalCost) * 100) : 0}%</td>
                     <td className="r">{n(u.input)}</td>
                     <td className="r">{n(u.output)}</td>
-                    <td className="r">{n(u.cache)}</td>
+                    <td className="r">{n(u.cacheWrite)}</td>
+                    <td className="r">{n(u.cacheRead)}</td>
                     <td className="m">{Object.keys(u.models).join(", ")}</td>
                   </tr>
                 ))}
