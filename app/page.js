@@ -15,12 +15,15 @@ export default async function Page({ searchParams }) {
   const aliases = Object.fromEntries(
     (process.env.USER_ALIASES || "").split(",").map((p) => p.split("=").map((x) => x.trim())).filter((p) => p[0] && p[1])
   );
+  // HIDE_USERS="test@example.com,other" leaves these names out of the dashboard
+  const hidden = new Set((process.env.HIDE_USERS || "").split(",").map((x) => x.trim()).filter(Boolean));
   const users = {};
   const daily = dates.map(() => 0);
   rows.forEach((h, i) => {
     for (const [field, v] of Object.entries(h || {})) {
       const [rawUser, model, type] = field.split("|");
       const user = aliases[rawUser] || rawUser;
+      if (hidden.has(rawUser) || hidden.has(user)) continue;
       const u = (users[user] ||= { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, cost: 0, tokens: 0, models: {} });
       const val = Number(v);
       if (type === "cost") { u.cost += val; daily[i] += val; continue; }
