@@ -1,20 +1,6 @@
-export type Person = {
-  name: string
-  seen: number
-  installed: boolean
-  cost: number
-  input: number
-  output: number
-  cacheWrite: number
-  cacheRead: number
-}
-export type Team = {
-  you: string
-  youName: string
-  nameSet: boolean
-  updated: number
-  periods: { today: Record<string, Person>; week: Record<string, Person>; month: Record<string, Person> }
-}
+export type Bucket = { input: number; output: number; cacheWrite: number; cacheRead: number; messages: number }
+export type Member = { handle: string; name: string; seen: number; today: Bucket; week: Bucket; month: Bucket }
+export type Team = { you: string; members: Member[] }
 export type View = { team: Team | null; error: string }
 
 declare module 'claude-code' {

@@ -1,7 +1,7 @@
 {
   "name": "team-usage",
-  "version": "0.2.0",
-  "description": "See everyone on your team who has installed this, with their Claude Code usage, in a small expandable chip above the prompt.",
+  "version": "0.3.0",
+  "description": "See everyone on your team who has installed this, ranked by Claude Code usage, in a small expandable chip above the prompt. No tokens or setup.",
   "author": {
     "name": "shivam12345-hyphen"
   },

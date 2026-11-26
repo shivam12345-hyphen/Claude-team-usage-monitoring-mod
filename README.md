@@ -1,30 +1,23 @@
 # Claude team usage
 
-Shows how much each person on a team uses Claude Code, inside Claude itself: a small
-chip above the prompt that expands into a ranked leaderboard (today, 7 days, 30 days).
-Only usage numbers and estimated cost are tracked, never prompts or code. Covers Claude
-Code only, not claude.ai chat.
+A small chip above the Claude prompt showing everyone on your team who has installed it, ranked by how much
+Claude Code they used (today, 7 or 30 days). No tokens, no passwords, no telemetry setup: install the mod and you are on the list.
 
-How it works: each person's Claude Code sends its usage to a small server in this repo
-(`/v1/metrics`), stored in Redis. The mod reads it back from `/api/usage`. Each person has
-a personal token, so usage is attributed by token even when people share one Claude account.
-
-## 1. Deploy (once)
-1. Import this repo in Vercel and add **Upstash Redis** (provides `REDIS_URL`).
-2. Add env var `INGEST_TOKENS`: `token1=shivam,token2=pranav,...` (make tokens with `openssl rand -hex 24`).
-3. Optional: `HIDE_USERS` (comma list to hide) and `USER_ALIASES` (`old=new` renames).
-4. Redeploy. Edit `INGEST_TOKENS` and redeploy any time to add or remove people.
-
-## 2. Each person: set up telemetry (Mac)
-```bash
-curl -fsSL https://raw.githubusercontent.com/shivam12345-hyphen/Claude-team-usage-monitoring-mod/main/setup.sh | bash
-```
-Paste your personal token when asked, then fully quit and reopen Claude Code.
-(Windows: `setup.ps1` in PowerShell.)
-
-## 3. Each person: install the mod (Claude desktop app)
+## Install (each person, in the Claude desktop app or Claude Code)
 ```
 /plugin install team-usage --marketplace shivam12345-hyphen/Claude-team-usage-monitoring-mod
 ```
-Installing adds you to the team list straight away, even before you have any usage. Click the chip above the prompt to expand it; `/team-usage` opens the full pane, and `/team-usage name <your name>` sets the name teammates see.
-The mod reads the endpoint and token from `~/.claude/settings.json` written by step 2.
+Then use Claude Code as normal. Click the chip above the prompt to expand it.
+Set the name teammates see with `/team-usage name <your name>` (it defaults to your computer username).
+
+## How it works
+The mod adds up your own usage from the transcripts Claude Code already keeps on your computer, and sends only
+your name and token totals to a small server in this repo (`/api/sync`), stored in Redis. It reads everyone's totals back
+from `/api/team`. Prompts, code and file names never leave your machine.
+
+The server is open: it has no login, so anyone with the URL can read the list or add an entry. Each install uses a
+random id (stored only on your machine; the server keeps just its hash), so nobody else can change your row.
+Counts are new tokens (input, output and cache writes). Cache reads are left out.
+
+## Deploy the server (once)
+Import this repo in Vercel and add **Upstash Redis** (it provides `REDIS_URL`). No other settings are needed.

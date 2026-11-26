@@ -1,75 +1,135 @@
 import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
-import type { Person, Team } from '../types'
+import type { Bucket, Member, Team } from '../types'
 
+// The shared team server. It stores only each person's name and usage totals.
+const SERVER = 'https://claudeusage-mocha.vercel.app'
 const PANE = 'team-usage'
 const ONLINE_MS = 10 * 60 * 1000
+const DAY = 864e5
+const CHUNK = 3 * 1024 * 1024
 
 const view = atom({ plugin: 'team-usage', key: 'view' } as const, { team: null, error: '' }, {
-  shape: 'view-2',
+  shape: 'view-3',
 })
 const open = atom({ plugin: 'team-usage', key: 'open' } as const, false)
 const period = atom({ plugin: 'team-usage', key: 'period' } as const, 'week')
 
 const LABEL = { today: 'Today', week: '7 days', month: '30 days' } as const
 
+const empty = (): Bucket => ({ input: 0, output: 0, cacheWrite: 0, cacheRead: 0, messages: 0 })
 const short = (x: number) =>
   x >= 1e6 ? (x / 1e6).toFixed(1) + 'M' : x >= 1e3 ? (x / 1e3).toFixed(1) + 'K' : String(Math.round(x))
-const fresh = (p: Person) => p.input + p.output + p.cacheWrite
-const shown = (name: string, max: number) => {
-  const n = name.includes('@') ? name.split('@')[0] ?? name : name
-  return n.length > max ? n.slice(0, max - 1) + '…' : n
-}
-const money = (x: number) => '$' + x.toFixed(2)
+const fresh = (b: Bucket) => b.input + b.output + b.cacheWrite
+const shown = (name: string, max: number) => (name.length > max ? name.slice(0, max - 1) + '…' : name)
 const bar = (x: number, max: number) => {
   const n = max > 0 && x > 0 ? Math.max(1, Math.round((x / max) * 8)) : 0
   return '▰'.repeat(n) + '▱'.repeat(8 - n)
 }
-const ranked = (people: Record<string, Person>) =>
-  Object.entries(people).sort((a, b) => b[1].cost - a[1].cost || a[1].name.localeCompare(b[1].name))
+const ranked = (members: Member[], per: 'today' | 'week' | 'month') =>
+  [...members].sort((a, b) => fresh(b[per]) - fresh(a[per]) || a.name.localeCompare(b.name))
 
-// Reads the dashboard address and your personal token from the settings the setup script wrote.
-async function connection($: any) {
-  const home = await $.env.get('HOME')
-  let raw = ''
+type Msg = { t: number; i: number; o: number; cw: number; cr: number }
+// Per transcript file: the last-seen usage of each assistant message, kept until the file changes.
+const files = new Map<string, { sig: string; msgs: Map<string, Msg> }>()
+
+function parseLine(line: string, into: Map<string, Msg>) {
+  if (!line.includes('"usage"')) return
   try {
-    raw = await $.fs.read(`${home}/.claude/settings.json`)
-  } catch {
-    throw new Error('Could not read ~/.claude/settings.json. Run the team setup script first.')
+    const j = JSON.parse(line)
+    const m = j.message
+    if (j.type !== 'assistant' || !m?.usage) return
+    const u = m.usage
+    const id = String(m.id || j.uuid || into.size) + '|' + String(j.requestId || '')
+    into.set(id, {
+      t: Date.parse(j.timestamp) || 0,
+      i: u.input_tokens || 0,
+      o: u.output_tokens || 0,
+      cw: u.cache_creation_input_tokens || 0,
+      cr: u.cache_read_input_tokens || 0,
+    })
+  } catch {}
+}
+
+// Your own usage, summed from the transcripts Claude Code keeps on this computer.
+async function scan($: any) {
+  const home = await $.env.get('HOME')
+  const root = `${home}/.claude/projects`
+  const now = await $.clock.now()
+  const out = { today: empty(), week: empty(), month: empty() }
+  const seen = new Set<string>()
+  const dirs = await $.fs.list(root).catch(() => [])
+  for (const d of dirs) {
+    if (d.kind !== 'directory') continue
+    const entries = await $.fs.list(`${root}/${d.name}`).catch(() => [])
+    for (const f of entries) {
+      if (f.kind !== 'file' || !f.name.endsWith('.jsonl') || now - f.mtimeMs > 31 * DAY) continue
+      const path = `${root}/${d.name}/${f.name}`
+      seen.add(path)
+      const sig = `${f.mtimeMs}:${f.size}`
+      let entry = files.get(path)
+      if (!entry || entry.sig !== sig) {
+        const msgs = new Map<string, Msg>()
+        let carry = ''
+        for (let off = 0; off < f.size; off += CHUNK) {
+          const text = carry + (await $.fs.read(path, { offset: off, length: CHUNK }))
+          const lines = text.split('\n')
+          carry = lines.pop() ?? ''
+          for (const l of lines) parseLine(l, msgs)
+        }
+        parseLine(carry, msgs)
+        entry = { sig, msgs }
+        files.set(path, entry)
+      }
+      for (const m of entry.msgs.values()) {
+        const age = now - m.t
+        if (age > 30 * DAY) continue
+        const add = (b: Bucket) => {
+          b.input += m.i; b.output += m.o; b.cacheWrite += m.cw; b.cacheRead += m.cr; b.messages += 1
+        }
+        add(out.month)
+        if (age <= 7 * DAY) add(out.week)
+        if (age <= DAY) add(out.today)
+      }
+    }
   }
-  const env = JSON.parse(raw).env || {}
-  const endpoint = String(env.OTEL_EXPORTER_OTLP_ENDPOINT || '').replace(/\/+$/, '')
-  const auth = String(env.OTEL_EXPORTER_OTLP_HEADERS || '').replace(/^Authorization=/, '')
-  if (!endpoint || !auth) throw new Error('Team setup not found. Run the setup script first.')
-  return { endpoint, auth }
+  for (const p of [...files.keys()]) if (!seen.has(p)) files.delete(p)
+  return out
 }
 
-async function load($: any): Promise<Team> {
-  const { endpoint, auth } = await connection($)
-  const res = await $.http.fetch(`${endpoint}/api/usage`, { headers: { Authorization: auth } })
-  if (res.status === 401) throw new Error('Your token was not accepted. Ask for a new personal token.')
-  if (!res.ok) throw new Error(`The team server answered ${res.status}.`)
-  return JSON.parse(res.text)
+async function identity($: any) {
+  let id = String((await $.store.get('id')) ?? '')
+  if (!/^[a-zA-Z0-9-]{16,64}$/.test(id)) {
+    id = Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('')
+    await $.store.set('id', id)
+  }
+  let name = String((await $.store.get('name')) ?? '')
+  if (!name) {
+    name = String((await $.env.get('USER')) ?? '') || 'anonymous'
+    await $.store.set('name', name)
+  }
+  return { id, name }
 }
 
-async function rename($: any, name: string): Promise<string> {
-  const { endpoint, auth } = await connection($)
-  const res = await $.http.fetch(`${endpoint}/api/me`, {
-    method: 'POST',
-    headers: { Authorization: auth, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
-  })
-  if (!res.ok) throw new Error(`Could not save the name (${res.status}).`)
-  return JSON.parse(res.text).name
-}
-
+// Posts your totals, then reads back the whole team.
 async function refresh($: any) {
   try {
-    const team = await load($)
+    const { id, name } = await identity($)
+    const usage = await scan($)
+    const post = await $.http.fetch(`${SERVER}/api/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, name, usage }),
+    })
+    if (!post.ok) throw new Error(`The team server answered ${post.status}.`)
+    const you = JSON.parse(post.text).you as string
+    const res = await $.http.fetch(`${SERVER}/api/team`)
+    if (!res.ok) throw new Error(`The team server answered ${res.status}.`)
+    const team: Team = { you, members: JSON.parse(res.text).members }
     await update($, view, () => ({ team, error: '' }))
-    const list = ranked(team.periods.week)
-    const rank = list.findIndex(([id]) => id === team.you) + 1
+    const list = ranked(team.members, 'week')
+    const rank = list.findIndex(m => m.handle === you) + 1
     $.ui.status(rank ? `Team #${rank}/${list.length} this week` : 'Team usage')
   } catch (e: any) {
     await update($, view, v => ({ ...v, error: String(e?.message || e) }))
@@ -92,13 +152,10 @@ export const register: Register = on => {
     const args = e.args.trim()
     const m = args.match(/^name\s+(.+)$/i)
     if (m) {
-      try {
-        const saved = await rename($, m[1] ?? '')
-        await refresh($)
-        return { text: `Done. Your teammates now see you as "${saved}".` }
-      } catch (err: any) {
-        return { text: String(err?.message || err) }
-      }
+      const name = (m[1] ?? '').trim().slice(0, 24)
+      await $.store.set('name', name)
+      await refresh($)
+      return { text: `Done. Your teammates now see you as "${name}".` }
     }
     if (args && args !== 'open') {
       return { text: 'Use /team-usage to open the pane, or /team-usage name <your name> to change your name.' }
@@ -117,15 +174,15 @@ export const register: Register = on => {
     const { Box, Button, Text } = $.ui.resolve(e)
     const isOpen = await read($, open)
     const per = (await read($, period)) as 'today' | 'week' | 'month'
-    const list = ranked(team.periods[per])
-    const mine = list.findIndex(([id]) => id === team.you)
-    const me = list[mine]?.[1]
-    const top = Math.max(0, ...list.map(([, p]) => p.cost))
+    const list = ranked(team.members, per)
+    const mine = list.findIndex(m => m.handle === team.you)
+    const me = list[mine]
+    const top = Math.max(0, ...list.map(m => fresh(m[per])))
     const now = Date.now()
 
     const label = isOpen
       ? '▾ Team usage'
-      : `▸ Team${mine >= 0 ? ` #${mine + 1}/${list.length}` : ''}${me ? ` · ${money(me.cost)}` : ''} · ${LABEL[per]}`
+      : `▸ Team${mine >= 0 ? ` #${mine + 1}/${list.length}` : ''}${me ? ` · ${short(fresh(me[per]))}` : ''} · ${LABEL[per]}`
 
     if (!isOpen) {
       return (
@@ -148,22 +205,21 @@ export const register: Register = on => {
             <Button key={'p' + k} plain dimColor={k !== per} label={(k === per ? '● ' : '○ ') + LABEL[k]} onPress={() => update($, period, () => k)} />
           ))}
         </Box>
-        {list.map(([id, p], i) => {
-          const isMe = id === team.you
-          const online = p.seen > 0 && now - p.seen < ONLINE_MS
+        {list.map((m, i) => {
+          const isMe = m.handle === team.you
+          const online = now - m.seen < ONLINE_MS
           return (
-            <Box key={'r' + id}>
+            <Box key={'r' + m.handle}>
               <Box width={3}><Text dimColor>{String(i + 1)}</Text></Box>
-              <Box width={15}><Text bold={isMe} color={isMe ? 'claude' : undefined}>{shown(p.name, 14)}</Text></Box>
-              <Box width={10}><Text color="suggestion">{bar(p.cost, top)}</Text></Box>
-              <Box width={8} justifyContent="flex-end"><Text>{money(p.cost)}</Text></Box>
-              <Box width={9} justifyContent="flex-end"><Text dimColor>{short(fresh(p))}</Text></Box>
+              <Box width={15}><Text bold={isMe} color={isMe ? 'claude' : undefined}>{shown(m.name, 14)}</Text></Box>
+              <Box width={10}><Text color="suggestion">{bar(fresh(m[per]), top)}</Text></Box>
+              <Box width={9} justifyContent="flex-end"><Text>{short(fresh(m[per]))}</Text></Box>
               <Box width={3} justifyContent="center"><Text color="success">{online ? '●' : ' '}</Text></Box>
               <Text color="claude">{isMe ? '← you' : ''}</Text>
             </Box>
           )
         })}
-        <Text dimColor>{team.nameSet ? '● online now' : '● online now · rename: /team-usage name <your name>'}</Text>
+        <Text dimColor>● online now · new tokens (cache excluded) · rename: /team-usage name {'<your name>'}</Text>
       </Box>
     )
   })
@@ -173,25 +229,21 @@ export const register: Register = on => {
     const v = await read($, view)
     if (!v.team) return <Text dimColor>{v.error || 'Loading team usage…'}</Text>
     const team = v.team
-    const section = (label: string, people: Record<string, Person>) => {
-      const list = ranked(people)
-      return (
-        <Box flexDirection="column" marginBottom={1}>
-          <Text bold>{label}</Text>
-          {list.map(([id, p], i) => (
-            <Text bold={id === team.you}>
-              {i + 1}. {shown(p.name, 24)}{id === team.you ? ' (you)' : ''}  {money(p.cost)} · {short(fresh(p))} tokens
-            </Text>
-          ))}
-        </Box>
-      )
-    }
+    const section = (label: string, per: 'today' | 'week' | 'month') => (
+      <Box flexDirection="column" marginBottom={1}>
+        <Text bold>{label}</Text>
+        {ranked(team.members, per).map((m, i) => (
+          <Text bold={m.handle === team.you}>
+            {i + 1}. {shown(m.name, 24)}{m.handle === team.you ? ' (you)' : ''}  {short(fresh(m[per]))} tokens
+          </Text>
+        ))}
+      </Box>
+    )
     return (
       <Box flexDirection="column">
-        <Text dimColor>{'You are ' + team.youName + '. Change it: /team-usage name <your name>'}</Text>
-        {section('Today', team.periods.today)}
-        {section('Last 7 days', team.periods.week)}
-        {section('Last 30 days', team.periods.month)}
+        {section('Today', 'today')}
+        {section('Last 7 days', 'week')}
+        {section('Last 30 days', 'month')}
         {v.error && <Text dimColor>Last refresh failed: {v.error}</Text>}
       </Box>
     )
