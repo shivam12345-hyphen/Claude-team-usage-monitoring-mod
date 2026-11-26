@@ -3,7 +3,7 @@ import { guard } from "../../../lib/auth";
 
 export const dynamic = "force-dynamic";
 
-const STALE_MS = 35 * 864e5;
+const STALE_MS = 14 * 864e5; // rows that have not synced for two weeks are dropped
 
 // Everyone who has the mod installed, with their usage totals.
 export async function GET(req) {
@@ -23,7 +23,11 @@ async function handle() {
   for (const [handle, raw] of Object.entries(team)) {
     try {
       const m = JSON.parse(raw);
-      if (now - m.seen < STALE_MS) members.push({ handle, name: m.name, seen: m.seen, today: m.today, week: m.week, month: m.month });
+      if (now - m.seen >= STALE_MS) {
+        await redis.hdel("team", handle);
+        continue;
+      }
+      members.push({ handle, name: m.name, seen: m.seen, today: m.today, week: m.week, month: m.month });
     } catch {}
   }
   return Response.json({ updated: now, members });

@@ -15,9 +15,10 @@ const line = (id: string, input: number, output: number, ts: number) =>
   })
 const transcript = [line('m1', 1000, 200, Date.now() - 1000), line('m1', 1000, 200, Date.now() - 900), line('m2', 500, 50, Date.now() - 5 * 864e5), 'not json'].join('\n')
 
-function stub(on: any, posts: string[], opts: { login?: string; password?: string; fetches?: any[]; files?: Record<string, string>; team?: any[] } = {}) {
+function stub(on: any, posts: string[], opts: { login?: string; password?: string; fetches?: any[]; files?: Record<string, string>; team?: any[]; store?: Record<string, unknown> } = {}) {
   const files = opts.files ?? {}
   const store: Record<string, unknown> = 'login' in opts ? (opts.login ? { login: opts.login } : {}) : { login: 'teamuser:test-only-pass' }
+  Object.assign(store, opts.store ?? {})
   const password = opts.password ?? 'test-only-pass'
   on('clock.now', () => ({ value: Date.now() }))
   on('clock.every', () => ({ value: undefined }))
@@ -62,7 +63,7 @@ test('the chip lists everyone who installed, even with no usage, and expands', a
     expect(await band.find({ type: 'Button', text: /#2\/3/ }), surface + ' collapsed').toBeDefined()
     await (band as any).press({ key: 'toggle' })
     const texts = (await band.findAll({ type: 'Text' })).map((t: any) => t.text)
-    for (const want of ['Pranav', 'Shivam', 'Ketan', '← you', 'team-usage name']) {
+    for (const want of ['Pranav', 'Shivam', 'Ketan', '← you']) {
       expect(texts.some((t: string) => t.includes(want)), surface + ' missing ' + want + ' in ' + JSON.stringify(texts)).toBe(true)
     }
     await (band as any).press({ key: 'toggle' })
@@ -77,7 +78,7 @@ test('a sync sends only a random id, a name and token totals, never any text', a
   await wait()
   const body = posts[0] ?? '{}'
   const sent = JSON.parse(body)
-  expect(Object.keys(sent).sort()).toEqual(['id', 'name', 'usage'])
+  expect(Object.keys(sent).sort()).toEqual(['id', 'name', 'replaces', 'usage'])
   expect(sent.id).toMatch(/^[0-9a-f]{32}$/)
   expect(sent.name).toBe('shivam')
   // m1 appears twice (counted once) and m2 is five days old: 1000+200+100 today, +500+50+100 in the week
@@ -204,4 +205,48 @@ test('logout removes the login from the file too', async ($, on) => {
   await wait()
   await $.command.run({ command: 'team-usage', args: 'logout' } as any)
   expect(JSON.parse(files[file] ?? '{}').login).toBeUndefined()
+})
+
+test('a long team shows the top rows plus you, and says how many are hidden', async ($, on) => {
+  const mk = (i: number, tokens: number) => ({ handle: 'h' + i, name: 'Person' + i, seen: Date.now(), today: B(tokens), week: B(tokens), month: B(tokens) })
+  const list = [mk(1, 9000), mk(2, 8000), mk(3, 7000), mk(4, 6000), mk(5, 5000), mk(6, 4000), mk(7, 100)]
+  stub(on, [], { team: list })
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await wait()
+  const band = await $.ui.mount({ ...BAND, surface: 'desktop' } as any)
+  await (band as any).press({ key: 'toggle' })
+  const texts = (await band.findAll({ type: 'Text' })).map((t: any) => t.text)
+  expect(texts.some((t: string) => t.includes('+2 more'))).toBe(true)
+  expect(texts).toContain('Person1')
+  expect(texts).not.toContain('Person6')
+  await band.unmount()
+})
+
+test('your own row stays visible even when you rank below the cut', async ($, on) => {
+  const mk = (i: number, tokens: number, handle = 'h' + i) => ({ handle, name: 'Person' + i, seen: Date.now(), today: B(tokens), week: B(tokens), month: B(tokens) })
+  // the server tells the mod "you are bbb"; make bbb rank last among seven people
+  const list = [mk(1, 9000), mk(2, 8000), mk(3, 7000), mk(4, 6000), mk(5, 5000), mk(6, 4000), mk(7, 100, 'bbb')]
+  stub(on, [], { team: list })
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await wait()
+  const band = await $.ui.mount({ ...BAND, surface: 'desktop' } as any)
+  await (band as any).press({ key: 'toggle' })
+  const texts = (await band.findAll({ type: 'Text' })).map((t: any) => t.text)
+  expect(texts).toContain('Person7')
+  expect(texts.some((t: string) => t.includes('← you'))).toBe(true)
+  await band.unmount()
+})
+
+test('an id this copy used before is sent once so the server can drop the old row', async ($, on) => {
+  const posts: string[] = []
+  const files: Record<string, string> = { '/home/x/.claude/team-usage.json': JSON.stringify({ id: 'f'.repeat(32), name: 'Shivam' }) }
+  stub(on, posts, { files, store: { id: 'e'.repeat(32) } })
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await wait()
+  const first = JSON.parse(posts[0] ?? '{}')
+  expect(first.id).toBe('f'.repeat(32))
+  expect(first.replaces).toEqual(['e'.repeat(32)])
+  await $.command.run({ command: 'team-usage', args: 'name Shivam K' } as any)
+  const later = JSON.parse(posts[posts.length - 1] ?? '{}')
+  expect(later.replaces).toEqual([])
 })

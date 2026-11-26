@@ -133,6 +133,11 @@ async function identity($: any) {
       await $.fs.write(file, JSON.stringify({ ...saved, id, name }))
     } catch {}
   }
+  // If this copy used a different id before (its own store id), remember it so the server can drop that old row.
+  if (ID_OK.test(fromStore) && fromStore !== id) {
+    const had = ((await $.store.get('replaces')) as string[] | undefined) ?? []
+    if (!had.includes(fromStore)) await $.store.set('replaces', [...had, fromStore].slice(-3))
+  }
   await $.store.set('id', id)
   await $.store.set('name', name)
   return { id, name, fileLogin: String(saved.login ?? '') }
@@ -176,13 +181,15 @@ async function refreshOnce($: any) {
     if (at < 1) throw new Error(SIGN_IN)
     const auth = { 'x-team-user': login.slice(0, at), 'x-team-password': login.slice(at + 1) }
     const usage = await scan($)
+    const oldIds = (((await $.store.get('replaces')) as string[] | undefined) ?? []).filter(x => ID_OK.test(x))
     const post = await $.http.fetch(`${SERVER}/api/sync`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...auth },
-      body: JSON.stringify({ id, name, usage }),
+      body: JSON.stringify({ id, name, usage, replaces: oldIds }),
     })
     if (post.status === 401) throw new Error(WRONG_LOGIN)
     if (!post.ok) throw new Error(`The team server answered ${post.status}.`)
+    if (oldIds.length) await $.store.set('replaces', [])
     const you = String(JSON.parse(post.text).you)
     const res = await $.http.fetch(`${SERVER}/api/team`, { headers: auth })
     if (res.status === 401) throw new Error(WRONG_LOGIN)
@@ -289,24 +296,34 @@ export const register: Register = on => {
       )
     }
 
+    // Few lines: the terminal cuts a tall chip off. Show the top rows and always keep your own row in view.
+    const CAP = 5
+    let shownRows = list.map((m, i) => ({ m, i }))
+    if (shownRows.length > CAP) {
+      shownRows = shownRows.slice(0, CAP)
+      if (mine >= CAP) shownRows[CAP - 1] = { m: list[mine]!, i: mine }
+    }
+    const hidden = list.length - shownRows.length
+
     return (
-      <Box flexDirection="column" paddingX={1} borderStyle="round" borderColor="promptBorder">
+      <Box flexDirection="column">
         {prev}
         <Box>
           <Button key="toggle" plain label={label} onPress={() => update($, open, o => !o)} />
-          <Text dimColor>  {list.length} on the team</Text>
-        </Box>
-        <Box gap={2}>
-          {(['today', 'week', 'month'] as const).map(k => (
-            <Button key={'p' + k} plain dimColor={k !== per} label={(k === per ? '● ' : '○ ') + LABEL[k]} onPress={() => update($, period, () => k)} />
-          ))}
+          <Text dimColor>  {list.length} people</Text>
         </Box>
         <Box>
-          <Box width={28}><Text dimColor>{' '}</Text></Box>
+          <Box width={34}>
+            <Box gap={2}>
+              {(['today', 'week', 'month'] as const).map(k => (
+                <Button key={'p' + k} plain dimColor={k !== per} label={(k === per ? '● ' : '○ ') + LABEL[k]} onPress={() => update($, period, () => k)} />
+              ))}
+            </Box>
+          </Box>
           <Box width={8} justifyContent="flex-end"><Text dimColor>tokens</Text></Box>
           <Box width={9} justifyContent="flex-end"><Text dimColor>cache</Text></Box>
         </Box>
-        {list.map((m, i) => {
+        {shownRows.map(({ m, i }) => {
           const isMe = m.handle === team.you
           const online = now - m.seen < ONLINE_MS
           return (
@@ -321,7 +338,7 @@ export const register: Register = on => {
             </Box>
           )
         })}
-        <Text dimColor>{v.error ? 'Offline: ' + v.error : '● online · bar = plan use (output counts 5x, cache 0.1x) · /team-usage name <your name>'}</Text>
+        {hidden > 0 && <Text dimColor>  +{hidden} more · /team-usage shows everyone</Text>}
       </Box>
     )
   })

@@ -43,5 +43,12 @@ async function handle(req) {
   // several people can share a Mac account name, and none of them may hide another.
   const row = { name, seen: Date.now(), today: bucket(u.today), week: bucket(u.week), month: bucket(u.month) };
   await redis.hset("team", handle, JSON.stringify(row));
+  // An install that switched to a new id says which old ids were its own. Only someone who knows an old id can name it,
+  // so this can only remove the caller's own earlier row.
+  for (const old of Array.isArray(body?.replaces) ? body.replaces.slice(0, 3) : []) {
+    if (!/^[a-zA-Z0-9-]{16,64}$/.test(String(old))) continue;
+    const oldHandle = createHash("sha256").update(String(old)).digest("hex").slice(0, 10);
+    if (oldHandle !== handle && oldHandle in team) await redis.hdel("team", oldHandle);
+  }
   return Response.json({ you: handle });
 }
