@@ -21,7 +21,7 @@ export default async function Page({ searchParams }) {
       if (type === "cost") { u.cost += val; daily[i] += val; continue; }
       if (type === "input") u.input += val;
       else if (type === "output") u.output += val;
-      else u.cache += val;
+      else { u.cache += val; continue; } // cache reads/writes are re-sent context, not new usage
       u.tokens += val;
       u.models[model] = (u.models[model] || 0) + val;
     }
@@ -48,7 +48,7 @@ export default async function Page({ searchParams }) {
 
       <section className="stats">
         <div><b>${totalCost.toFixed(2)}</b><span>estimated spend</span></div>
-        <div><b>{short(totalTokens)}</b><span>tokens used</span></div>
+        <div><b>{short(totalTokens)}</b><span>input + output tokens</span></div>
         <div><b>{list.length}</b><span>active {list.length === 1 ? "person" : "people"}</span></div>
         <div><b>${list.length ? (totalCost / list.length).toFixed(2) : "0.00"}</b><span>average per person</span></div>
       </section>
