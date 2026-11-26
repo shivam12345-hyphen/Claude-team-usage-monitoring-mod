@@ -29,7 +29,7 @@ export async function POST(req) {
         if (!kind) continue;
         for (const p of m.sum?.dataPoints || []) {
           const a = { ...res, ...attrs(p.attributes) };
-          const user = a["user.email"] || a["user.account_uuid"] || a["user.id"] || "unknown";
+          const user = a["member.name"] || a["user.email"] || a["user.account_uuid"] || a["user.id"] || "unknown";
           const model = a.model || "unknown";
           const field = `${user}|${model}|${kind === "cost" ? "cost" : a.type || "other"}`;
           inc[field] = (inc[field] || 0) + Number(p.asDouble ?? p.asInt ?? 0);
