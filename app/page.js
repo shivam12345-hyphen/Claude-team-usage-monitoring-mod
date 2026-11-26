@@ -11,11 +11,16 @@ export default async function Page({ searchParams }) {
   const dates = Array.from({ length: days }, (_, i) => new Date(Date.now() - i * 864e5).toISOString().slice(0, 10)).reverse();
   const rows = await Promise.all(dates.map((d) => redis.hgetall(`u:${d}`)));
 
+  // USER_ALIASES="old@email.com=shivam,other=name" shows old entries under a chosen name
+  const aliases = Object.fromEntries(
+    (process.env.USER_ALIASES || "").split(",").map((p) => p.split("=").map((x) => x.trim())).filter((p) => p[0] && p[1])
+  );
   const users = {};
   const daily = dates.map(() => 0);
   rows.forEach((h, i) => {
     for (const [field, v] of Object.entries(h || {})) {
-      const [user, model, type] = field.split("|");
+      const [rawUser, model, type] = field.split("|");
+      const user = aliases[rawUser] || rawUser;
       const u = (users[user] ||= { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, cost: 0, tokens: 0, models: {} });
       const val = Number(v);
       if (type === "cost") { u.cost += val; daily[i] += val; continue; }
