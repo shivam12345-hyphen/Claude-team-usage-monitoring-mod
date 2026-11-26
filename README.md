@@ -16,7 +16,7 @@ Click the chip above the prompt to expand it. Rename yourself with `/team-usage 
 ## What is shared
 The mod adds up usage numbers from the transcripts Claude Code keeps on your computer and sends the team server only
 a random id, your name and token counts (input, output, cache) for today, 7 days and 30 days. It never stores or sends
-prompts, code, file names or answers. Counts are new tokens (input, output and cache writes); cache reads are left out.
+prompts, code, file names or answers. Each row shows two numbers: tokens (input + output) and cache (cache writes + reads, the context Claude stores and re-reads each turn).
 The server requires the team login (one shared username and password), so outsiders cannot read the list or add entries.
 Inside the team, only your install can change your own row (the server keeps only a hash of your random id).
 

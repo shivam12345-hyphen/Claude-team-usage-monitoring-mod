@@ -24,7 +24,9 @@ const LABEL = { today: 'Today', week: '7 days', month: '30 days' } as const
 const empty = (): Bucket => ({ input: 0, output: 0, cacheWrite: 0, cacheRead: 0, messages: 0 })
 const short = (x: number) =>
   x >= 1e6 ? (x / 1e6).toFixed(1) + 'M' : x >= 1e3 ? (x / 1e3).toFixed(1) + 'K' : String(Math.round(x))
-const fresh = (b: Bucket) => b.input + b.output + b.cacheWrite
+// tokens = what you and Claude sent and wrote; cache = the context Claude stored and re-read
+const fresh = (b: Bucket) => b.input + b.output
+const cached = (b: Bucket) => b.cacheWrite + b.cacheRead
 const shown = (name: string, max: number) => (name.length > max ? name.slice(0, max - 1) + '…' : name)
 const bar = (x: number, max: number) => {
   const n = max > 0 && x > 0 ? Math.max(1, Math.round((x / max) * 8)) : 0
@@ -218,7 +220,7 @@ export const register: Register = on => {
 
     const label = isOpen
       ? '▾ Team usage'
-      : `▸ Team${mine >= 0 ? ` #${mine + 1}/${list.length}` : ''}${me ? ` · ${short(fresh(me[per]))}` : ''} · ${LABEL[per]}`
+      : `▸ Team${mine >= 0 ? ` #${mine + 1}/${list.length}` : ''}${me ? ` · ${short(fresh(me[per]))} tokens · ${short(cached(me[per]))} cache` : ''} · ${LABEL[per]}`
 
     if (!isOpen) {
       return (
@@ -241,6 +243,11 @@ export const register: Register = on => {
             <Button key={'p' + k} plain dimColor={k !== per} label={(k === per ? '● ' : '○ ') + LABEL[k]} onPress={() => update($, period, () => k)} />
           ))}
         </Box>
+        <Box>
+          <Box width={28}><Text dimColor>{' '}</Text></Box>
+          <Box width={8} justifyContent="flex-end"><Text dimColor>tokens</Text></Box>
+          <Box width={9} justifyContent="flex-end"><Text dimColor>cache</Text></Box>
+        </Box>
         {list.map((m, i) => {
           const isMe = m.handle === team.you
           const online = now - m.seen < ONLINE_MS
@@ -249,13 +256,14 @@ export const register: Register = on => {
               <Box width={3}><Text dimColor>{String(i + 1)}</Text></Box>
               <Box width={15}><Text bold={isMe} color={isMe ? 'claude' : undefined}>{shown(m.name, 14)}</Text></Box>
               <Box width={10}><Text color="suggestion">{bar(fresh(m[per]), top)}</Text></Box>
-              <Box width={9} justifyContent="flex-end"><Text>{short(fresh(m[per]))}</Text></Box>
+              <Box width={8} justifyContent="flex-end"><Text>{short(fresh(m[per]))}</Text></Box>
+              <Box width={9} justifyContent="flex-end"><Text dimColor>{short(cached(m[per]))}</Text></Box>
               <Box width={3} justifyContent="center"><Text color="success">{online ? '●' : ' '}</Text></Box>
               <Text color="claude">{isMe ? '← you' : ''}</Text>
             </Box>
           )
         })}
-        <Text dimColor>{v.error ? 'Offline: ' + v.error : '● online now · new tokens (cache excluded) · /team-usage name <your name>'}</Text>
+        <Text dimColor>{v.error ? 'Offline: ' + v.error : '● online · tokens = input + output · cache = stored + re-read context · /team-usage name <your name>'}</Text>
       </Box>
     )
   })
@@ -270,7 +278,7 @@ export const register: Register = on => {
         <Text bold>{label}</Text>
         {ranked(team.members, per).map((m, i) => (
           <Text bold={m.handle === team.you}>
-            {i + 1}. {shown(m.name, 24)}{m.handle === team.you ? ' (you)' : ''}  {short(fresh(m[per]))} tokens
+            {i + 1}. {shown(m.name, 24)}{m.handle === team.you ? ' (you)' : ''}  {short(fresh(m[per]))} tokens · {short(cached(m[per]))} cache
           </Text>
         ))}
       </Box>
