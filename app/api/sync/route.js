@@ -35,6 +35,16 @@ async function handle(req) {
   const handle = createHash("sha256").update(id).digest("hex").slice(0, 10);
 
   const team = await redis.hgetall("team");
+  const machine0 = /^[a-f0-9]{8,16}$/.test(String(body?.machine ?? ""));
+  if (!machine0) {
+    // An older install (no computer tag): if a tagged row with this name exists it is the same person, so do not add a twin.
+    for (const [other, raw] of Object.entries(team)) {
+      try {
+        const o = JSON.parse(raw);
+        if (other !== handle && o.machine && o.name === name) return Response.json({ you: other });
+      } catch {}
+    }
+  }
   if (!(handle in team) && Object.keys(team).length >= MAX_MEMBERS) {
     return Response.json({ error: "team is full" }, { status: 429 });
   }

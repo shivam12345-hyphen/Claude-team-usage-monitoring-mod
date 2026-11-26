@@ -27,13 +27,15 @@ const short = (x: number) =>
 // tokens = what you and Claude sent and wrote; cache = the context Claude stored and re-read
 const fresh = (b: Bucket) => b.input + b.output
 const cached = (b: Bucket) => b.cacheWrite + b.cacheRead
+// Ranking weight: how much of your plan a person's use consumes. Output costs about 5x input, cache writes 1.25x, cache reads 0.1x.
+const weight = (b: Bucket) => b.input + 5 * b.output + 1.25 * b.cacheWrite + 0.1 * b.cacheRead
 const shown = (name: string, max: number) => (name.length > max ? name.slice(0, max - 1) + '…' : name)
 const bar = (x: number, max: number) => {
   const n = max > 0 && x > 0 ? Math.max(1, Math.round((x / max) * 8)) : 0
   return '▰'.repeat(n) + '▱'.repeat(8 - n)
 }
 const ranked = (members: Member[], per: 'today' | 'week' | 'month') =>
-  [...members].sort((a, b) => fresh(b[per]) - fresh(a[per]) || a.name.localeCompare(b.name))
+  [...members].sort((a, b) => weight(b[per]) - weight(a[per]) || a.name.localeCompare(b.name))
 
 type Msg = { t: number; i: number; o: number; cw: number; cr: number }
 // Per transcript file: the last-seen usage of each assistant message, kept until the file changes.
@@ -58,9 +60,11 @@ function parseLine(line: string, into: Map<string, Msg>) {
 }
 
 // Your own usage, summed from the transcripts Claude Code keeps on this computer.
+let lastScan = { root: '', files: 0, today: 0, month: 0 }
 async function scan($: any) {
   const home = await $.env.get('HOME')
-  const root = `${home}/.claude/projects`
+  const configDir = String((await $.env.get('CLAUDE_CONFIG_DIR')) ?? '') || `${home}/.claude`
+  const root = `${configDir}/projects`
   const now = await $.clock.now()
   const out = { today: empty(), week: empty(), month: empty() }
   const seen = new Set<string>()
@@ -104,6 +108,7 @@ async function scan($: any) {
     }
   }
   for (const p of [...files.keys()]) if (!seen.has(p)) files.delete(p)
+  lastScan = { root, files: seen.size, today: out.today.messages, month: out.month.messages }
   return out
 }
 
@@ -221,6 +226,16 @@ export const register: Register = on => {
       const v = await read($, view)
       return { text: v.team ? 'Signed in. You are now on the team list.' : v.error }
     }
+    if (/^debug$/i.test(args)) {
+      await refresh($)
+      const v = await read($, view)
+      const me = v.team?.members.find(m => m.handle === v.team?.you)
+      return {
+        text: `Reading ${lastScan.root} | transcript files in the last 31 days: ${lastScan.files} | replies counted today: ${lastScan.today}, in 30 days: ${lastScan.month}` +
+          (me ? ` | today: ${short(fresh(me.today))} tokens, ${short(cached(me.today))} cache` : '') +
+          (v.error ? ` | problem: ${v.error}` : ''),
+      }
+    }
     if (/^logout$/i.test(args)) {
       await $.store.set('login', '')
       await update($, view, () => ({ team: null, error: SIGN_IN }))
@@ -256,7 +271,7 @@ export const register: Register = on => {
     const list = ranked(team.members, per)
     const mine = list.findIndex(m => m.handle === team.you)
     const me = list[mine]
-    const top = Math.max(0, ...list.map(m => fresh(m[per])))
+    const top = Math.max(0, ...list.map(m => weight(m[per])))
     const now = Date.now()
 
     const label = isOpen
@@ -296,7 +311,7 @@ export const register: Register = on => {
             <Box key={'r' + m.handle}>
               <Box width={3}><Text dimColor>{String(i + 1)}</Text></Box>
               <Box width={15}><Text bold={isMe} color={isMe ? 'claude' : undefined}>{shown(m.name, 14)}</Text></Box>
-              <Box width={10}><Text color="suggestion">{bar(fresh(m[per]), top)}</Text></Box>
+              <Box width={10}><Text color="suggestion">{bar(weight(m[per]), top)}</Text></Box>
               <Box width={8} justifyContent="flex-end"><Text>{short(fresh(m[per]))}</Text></Box>
               <Box width={9} justifyContent="flex-end"><Text dimColor>{short(cached(m[per]))}</Text></Box>
               <Box width={3} justifyContent="center"><Text color="success">{online ? '●' : ' '}</Text></Box>
@@ -304,7 +319,7 @@ export const register: Register = on => {
             </Box>
           )
         })}
-        <Text dimColor>{v.error ? 'Offline: ' + v.error : '● online · tokens = input + output · cache = stored + re-read context · /team-usage name <your name>'}</Text>
+        <Text dimColor>{v.error ? 'Offline: ' + v.error : '● online · bar = plan use (output counts 5x, cache 0.1x) · /team-usage name <your name>'}</Text>
       </Box>
     )
   })

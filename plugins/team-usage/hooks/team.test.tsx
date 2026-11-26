@@ -15,7 +15,7 @@ const line = (id: string, input: number, output: number, ts: number) =>
   })
 const transcript = [line('m1', 1000, 200, Date.now() - 1000), line('m1', 1000, 200, Date.now() - 900), line('m2', 500, 50, Date.now() - 5 * 864e5), 'not json'].join('\n')
 
-function stub(on: any, posts: string[], opts: { login?: string; password?: string; fetches?: any[]; files?: Record<string, string> } = {}) {
+function stub(on: any, posts: string[], opts: { login?: string; password?: string; fetches?: any[]; files?: Record<string, string>; team?: any[] } = {}) {
   const files = opts.files ?? {}
   const store: Record<string, unknown> = 'login' in opts ? (opts.login ? { login: opts.login } : {}) : { login: 'teamuser:test-only-pass' }
   const password = opts.password ?? 'test-only-pass'
@@ -26,7 +26,7 @@ function stub(on: any, posts: string[], opts: { login?: string; password?: strin
   on('command.register', () => ({ value: { command: 'team-usage' } }))
   on('session.start', (_: any, e: any) => ({ cwd: e.cwd }))
   on('ui.render', ($: any, e: any) => { const { Text } = $.ui.resolve(e); return <Text>{''}</Text> })
-  on('env.get', (_: any, e: any) => ({ value: e.name === 'HOME' ? '/home/x' : 'shivam' }))
+  on('env.get', (_: any, e: any) => ({ value: e.name === 'HOME' ? '/home/x' : e.name === 'USER' ? 'shivam' : undefined }))
   on('store.get', (_: any, e: any) => ({ value: store[e.key] }))
   on('store.set', (_: any, e: any) => { store[e.key] = e.value; return { value: undefined } })
   on('fs.list', (_: any, e: any) => ({
@@ -47,7 +47,7 @@ function stub(on: any, posts: string[], opts: { login?: string; password?: strin
       posts.push(e.init.body)
       return { value: { status: 200, ok: true, headers: {}, text: '{"you":"bbb"}' } }
     }
-    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ members }) } }
+    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ members: opts.team ?? members }) } }
   })
 }
 
@@ -153,4 +153,30 @@ test('a first run creates the id file, and a rename updates it', async ($, on) =
   expect(JSON.parse(files[file] ?? '{}').id).toBe(JSON.parse(posts[0] ?? '{}').id)
   await $.command.run({ command: 'team-usage', args: 'name Pranav K' } as any)
   expect(JSON.parse(files[file] ?? '{}').name).toBe('Pranav K')
+})
+
+test('/team-usage debug says what was read', async ($, on) => {
+  stub(on, [])
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await wait()
+  const ran = JSON.stringify(await $.command.run({ command: 'team-usage', args: 'debug' } as any))
+  expect(ran).toContain('/home/x/.claude/projects')
+  expect(ran).toContain('transcript files')
+  expect(ran).toContain('replies counted today: 1')
+})
+
+test('the ranking follows plan use, not just input and output', async ($, on) => {
+  // A has more input+output; B has far more cache reads and output-heavy work, so B ranks higher.
+  const heavy = { input: 100, output: 50000, cacheWrite: 1000000, cacheRead: 100000000, messages: 5 }
+  const light = { input: 90000, output: 1000, cacheWrite: 0, cacheRead: 0, messages: 5 }
+  const mk = (handle: string, name: string, b: any) => ({ handle, name, seen: Date.now(), today: b, week: b, month: b })
+  const list = [mk('a', 'Light', light), mk('b', 'Heavy', heavy)]
+  stub(on, [], { team: list })
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await wait()
+  const band = await $.ui.mount({ ...BAND, surface: 'desktop' } as any)
+  await (band as any).press({ key: 'toggle' })
+  const texts = (await band.findAll({ type: 'Text' })).map((t: any) => t.text)
+  expect(texts.indexOf('Heavy')).toBeLessThan(texts.indexOf('Light'))
+  await band.unmount()
 })
