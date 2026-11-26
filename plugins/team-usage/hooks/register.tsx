@@ -72,12 +72,26 @@ async function scan($: any) {
   const dirs = await $.fs.list(root).catch((e: any) => {
     throw new Error(`Cannot read ${root}: ${String(e?.message || e)}`)
   })
+  // Transcripts: each project's own *.jsonl files, plus the subagent transcripts in <project>/<session>/subagents/.
+  // Subagent replies are real usage and are not repeated in the main files.
+  const recent = (f: any) => f.kind === 'file' && f.name.endsWith('.jsonl') && now - f.mtimeMs <= 31 * DAY
+  const cands: { path: string; size: number; mtimeMs: number }[] = []
   for (const d of dirs) {
     if (d.kind !== 'dir') continue
     const entries = await $.fs.list(`${root}/${d.name}`).catch(() => [])
     for (const f of entries) {
-      if (f.kind !== 'file' || !f.name.endsWith('.jsonl') || now - f.mtimeMs > 31 * DAY) continue
-      const path = `${root}/${d.name}/${f.name}`
+      if (recent(f)) cands.push({ path: `${root}/${d.name}/${f.name}`, size: f.size, mtimeMs: f.mtimeMs })
+      else if (f.kind === 'dir') {
+        const subs = await $.fs.list(`${root}/${d.name}/${f.name}/subagents`).catch(() => [])
+        for (const sf of subs) {
+          if (recent(sf)) cands.push({ path: `${root}/${d.name}/${f.name}/subagents/${sf.name}`, size: sf.size, mtimeMs: sf.mtimeMs })
+        }
+      }
+    }
+  }
+  {
+    for (const f of cands) {
+      const path = f.path
       seen.add(path)
       const sig = `${f.mtimeMs}:${f.size}`
       let entry = files.get(path)

@@ -15,7 +15,9 @@ const line = (id: string, input: number, output: number, ts: number) =>
   })
 const transcript = [line('m1', 1000, 200, Date.now() - 1000), line('m1', 1000, 200, Date.now() - 900), line('m2', 500, 50, Date.now() - 5 * 864e5), 'not json'].join('\n')
 
-function stub(on: any, posts: string[], opts: { login?: string; password?: string; fetches?: any[]; files?: Record<string, string>; team?: any[]; store?: Record<string, unknown> } = {}) {
+const subTranscript = line('sub1', 300, 4000, Date.now() - 2000) + '\n' + line('m1', 1000, 200, Date.now() - 1000) // m1 also appears in the main file
+
+function stub(on: any, posts: string[], opts: { login?: string; password?: string; fetches?: any[]; files?: Record<string, string>; team?: any[]; store?: Record<string, unknown>; sub?: boolean } = {}) {
   const files = opts.files ?? {}
   const store: Record<string, unknown> = 'login' in opts ? (opts.login ? { login: opts.login } : {}) : { login: 'teamuser:test-only-pass' }
   Object.assign(store, opts.store ?? {})
@@ -34,11 +36,13 @@ function stub(on: any, posts: string[], opts: { login?: string; password?: strin
     value: e.path === '/home/x/.claude/projects'
       ? [{ name: 'proj', kind: 'dir', size: 0, mtimeMs: 0, isLink: false }]
       : e.path === '/home/x/.claude/projects/proj'
-        ? [{ name: 's.jsonl', kind: 'file', size: transcript.length, mtimeMs: Date.now(), isLink: false }]
-        : [],
+        ? [{ name: 's.jsonl', kind: 'file', size: transcript.length, mtimeMs: Date.now(), isLink: false }, ...(opts.sub ? [{ name: 'sess', kind: 'dir', size: 0, mtimeMs: Date.now(), isLink: false }] : [])]
+        : e.path === '/home/x/.claude/projects/proj/sess/subagents' && opts.sub
+          ? [{ name: 'agent-1.jsonl', kind: 'file', size: subTranscript.length, mtimeMs: Date.now(), isLink: false }]
+          : [],
   }))
   on('fs.write', (_: any, e: any) => { files[e.path] = e.text; return { value: undefined } })
-  on('fs.read', (_: any, e: any) => ({ value: String(e.path).endsWith('team-usage.json') ? files[e.path] ?? '' : transcript }))
+  on('fs.read', (_: any, e: any) => ({ value: String(e.path).endsWith('team-usage.json') ? files[e.path] ?? '' : String(e.path).includes('/subagents/') ? subTranscript : transcript }))
   on('http.fetch', (_: any, e: any) => {
     opts.fetches?.push(e)
     if (e.init?.headers?.['x-team-password'] !== password) {
@@ -249,4 +253,15 @@ test('an id this copy used before is sent once so the server can drop the old ro
   await $.command.run({ command: 'team-usage', args: 'name Shivam K' } as any)
   const later = JSON.parse(posts[posts.length - 1] ?? '{}')
   expect(later.replaces).toEqual([])
+})
+
+test('subagent transcripts are counted too, and a reply that appears twice only once', async ($, on) => {
+  const posts: string[] = []
+  stub(on, posts, { sub: true })
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await wait()
+  const sent = JSON.parse(posts[0] ?? '{}')
+  // main file today: m1 = 1000 + 200 (+100 cache write); subagent adds sub1 = 300 + 4000 (+100 cache write); m1 is not doubled
+  expect(sent.usage.today.input + sent.usage.today.output).toBe(1000 + 200 + 300 + 4000)
+  expect(sent.usage.today.messages).toBe(2)
 })
