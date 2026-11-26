@@ -61,12 +61,18 @@ function parseLine(line: string, into: Map<string, Msg>) {
 
 // Your own usage, summed from the transcripts Claude Code keeps on this computer.
 let lastScan = { root: '', files: 0, today: 0, month: 0 }
+let lastDay = ''
 async function scan($: any) {
   const home = await $.env.get('HOME')
   const configDir = String((await $.env.get('CLAUDE_CONFIG_DIR')) ?? '') || `${home}/.claude`
   const root = `${configDir}/projects`
   const now = await $.clock.now()
   const out = { today: empty(), week: empty(), month: empty() }
+  // "Today" is the calendar day: it starts at midnight in this computer's own time zone.
+  const midnight = new Date(now)
+  midnight.setHours(0, 0, 0, 0)
+  const todayStart = midnight.getTime()
+  lastDay = midnight.toISOString()
   const seen = new Set<string>()
   const counted = new Set<string>() // the same message can sit in several transcripts (resumed or forked sessions)
   const dirs = await $.fs.list(root).catch((e: any) => {
@@ -117,7 +123,7 @@ async function scan($: any) {
         }
         add(out.month)
         if (age <= 7 * DAY) add(out.week)
-        if (age <= DAY) add(out.today)
+        if (m.t >= todayStart) add(out.today)
       }
     }
   }
@@ -253,7 +259,7 @@ export const register: Register = on => {
       const v = await read($, view)
       const me = v.team?.members.find(m => m.handle === v.team?.you)
       return {
-        text: `Reading ${lastScan.root} | transcript files in the last 31 days: ${lastScan.files} | replies counted today: ${lastScan.today}, in 30 days: ${lastScan.month}` +
+        text: `Today starts ${lastDay} | Reading ${lastScan.root} | transcript files in the last 31 days: ${lastScan.files} | replies counted today: ${lastScan.today}, in 30 days: ${lastScan.month}` +
           (me ? ` | today: ${short(fresh(me.today))} tokens, ${short(cached(me.today))} cache` : '') +
           (v.error ? ` | problem: ${v.error}` : ''),
       }
