@@ -12,6 +12,14 @@ const bucket = (b = {}) => ({
 // Each install posts its own usage totals. The random `id` never leaves the machine except here:
 // only its hash is shown to others, so nobody else can update your row.
 export async function POST(req) {
+  try {
+    return await handle(req);
+  } catch (e) {
+    return Response.json({ error: String(e?.message || e) }, { status: 503 });
+  }
+}
+
+async function handle(req) {
   let body;
   try {
     body = await req.json();

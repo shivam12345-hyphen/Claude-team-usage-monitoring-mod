@@ -17,6 +17,6 @@ The server has no login: anyone who knows its address can read the list or add a
 change your own row (the server keeps only a hash of your random id).
 
 ## Host the server (once, by the team owner)
-1. In Vercel, import this repo as a project named `claudeusage` (that gives `claudeusage-mocha.vercel.app` if free).
+1. In Vercel, import this repo as a project named `claudeteamusage` (it gives `claudeteamusage.vercel.app`).
 2. In the project, open Storage and add **Upstash Redis**; it provides `REDIS_URL`. No other settings are needed.
 3. Redeploy. If your address differs, change `SERVER` at the top of `plugins/team-usage/hooks/register.tsx` and push.

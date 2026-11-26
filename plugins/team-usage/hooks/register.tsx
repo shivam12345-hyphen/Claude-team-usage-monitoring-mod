@@ -5,7 +5,7 @@ import type { Bucket, Member, Team } from '../types'
 
 // The shared team server: it stores only each person's name and token totals.
 // If you host your own copy, change this address.
-const SERVER = 'https://claudeusage-mocha.vercel.app'
+const SERVER = 'https://claudeteamusage.vercel.app'
 const PANE = 'team-usage'
 const ONLINE_MS = 10 * 60 * 1000
 const DAY = 864e5
