@@ -107,33 +107,74 @@ async function scan($: any) {
   return out
 }
 
+// A short, non-reversible tag for this computer, so the server can tell two installs on one Mac are one person.
+function machineTag(text: string) {
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i)
+    h1 = Math.imul(h1 ^ c, 2654435761)
+    h2 = Math.imul(h2 ^ c, 1597334677)
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909)
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909)
+  return ((h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0'))
+}
+
+const ID_OK = /^[a-zA-Z0-9-]{16,64}$/
+
+// Your id and name live in one small file in ~/.claude, so every copy of the mod on this computer is one person.
 async function identity($: any) {
-  let id = String((await $.store.get('id')) ?? '')
-  if (!/^[a-zA-Z0-9-]{16,64}$/.test(id)) {
-    id = Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('')
-    await $.store.set('id', id)
+  const home = String((await $.env.get('HOME')) ?? '')
+  const user = String((await $.env.get('USER')) ?? '')
+  const file = `${home}/.claude/team-usage.json`
+  let saved: { id?: string; name?: string } = {}
+  try {
+    saved = JSON.parse(String(await $.fs.read(file)))
+  } catch {}
+  let id = String(saved.id ?? '')
+  let name = String(saved.name ?? '')
+  const fromStore = String((await $.store.get('id')) ?? '')
+  if (!ID_OK.test(id)) id = ID_OK.test(fromStore) ? fromStore : Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('')
+  if (!name) name = String((await $.store.get('name')) ?? '') || user || 'anonymous'
+  if (saved.id !== id || saved.name !== name) {
+    try {
+      await $.fs.write(file, JSON.stringify({ id, name }))
+    } catch {}
   }
-  let name = String((await $.store.get('name')) ?? '')
-  if (!name) {
-    name = String((await $.env.get('USER')) ?? '') || 'anonymous'
-    await $.store.set('name', name)
-  }
-  return { id, name }
+  await $.store.set('id', id)
+  await $.store.set('name', name)
+  return { id, name, machine: machineTag(`${home}|${user}`) }
+}
+
+async function saveName($: any, name: string) {
+  const { id } = await identity($)
+  const home = String((await $.env.get('HOME')) ?? '')
+  await $.store.set('name', name)
+  try {
+    await $.fs.write(`${home}/.claude/team-usage.json`, JSON.stringify({ id, name }))
+  } catch {}
+}
+
+// One refresh at a time, so two starts at once cannot make two ids.
+let running: Promise<void> = Promise.resolve()
+async function refresh($: any) {
+  running = running.then(() => refreshOnce($))
+  return running
 }
 
 // Sends your totals, then reads back the whole team.
-async function refresh($: any) {
+async function refreshOnce($: any) {
   try {
     const login = String((await $.store.get('login')) ?? '')
     const at = login.indexOf(':')
     if (at < 1) throw new Error(SIGN_IN)
     const auth = { 'x-team-user': login.slice(0, at), 'x-team-password': login.slice(at + 1) }
-    const { id, name } = await identity($)
+    const { id, name, machine } = await identity($)
     const usage = await scan($)
     const post = await $.http.fetch(`${SERVER}/api/sync`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...auth },
-      body: JSON.stringify({ id, name, usage }),
+      body: JSON.stringify({ id, name, machine, usage }),
     })
     if (post.status === 401) throw new Error(WRONG_LOGIN)
     if (!post.ok) throw new Error(`The team server answered ${post.status}.`)
@@ -168,7 +209,7 @@ export const register: Register = on => {
     const m = args.match(/^name\s+(.+)$/i)
     if (m) {
       const name = (m[1] ?? '').trim().slice(0, 24)
-      await $.store.set('name', name)
+      await saveName($, name)
       await refresh($)
       return { text: `Done. Your teammates now see you as "${name}".` }
     }

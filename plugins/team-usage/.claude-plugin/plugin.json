@@ -1,6 +1,6 @@
 {
   "name": "team-usage",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "A small chip above the prompt that ranks everyone on your team by Claude Code token usage. Sign in once with your team login.",
   "author": {
     "name": "shivam12345-hyphen"

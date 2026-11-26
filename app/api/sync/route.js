@@ -39,7 +39,16 @@ async function handle(req) {
     return Response.json({ error: "team is full" }, { status: 429 });
   }
   const u = body?.usage ?? {};
-  const row = { name, seen: Date.now(), today: bucket(u.today), week: bucket(u.week), month: bucket(u.month) };
+  // `machine` is a short hash of the computer. Two installs on one computer are one person: keep only the newest row.
+  const machine = /^[a-f0-9]{8,16}$/.test(String(body?.machine ?? "")) ? String(body.machine) : "";
+  const row = { name, machine, seen: Date.now(), today: bucket(u.today), week: bucket(u.week), month: bucket(u.month) };
   await redis.hset("team", handle, JSON.stringify(row));
+  if (machine) {
+    for (const [other, raw] of Object.entries(team)) {
+      try {
+        if (other !== handle && JSON.parse(raw).machine === machine) await redis.hdel("team", other);
+      } catch {}
+    }
+  }
   return Response.json({ you: handle });
 }

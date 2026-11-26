@@ -15,7 +15,8 @@ const line = (id: string, input: number, output: number, ts: number) =>
   })
 const transcript = [line('m1', 1000, 200, Date.now() - 1000), line('m1', 1000, 200, Date.now() - 900), line('m2', 500, 50, Date.now() - 5 * 864e5), 'not json'].join('\n')
 
-function stub(on: any, posts: string[], opts: { login?: string; password?: string; fetches?: any[] } = {}) {
+function stub(on: any, posts: string[], opts: { login?: string; password?: string; fetches?: any[]; files?: Record<string, string> } = {}) {
+  const files = opts.files ?? {}
   const store: Record<string, unknown> = 'login' in opts ? (opts.login ? { login: opts.login } : {}) : { login: 'teamuser:test-only-pass' }
   const password = opts.password ?? 'test-only-pass'
   on('clock.now', () => ({ value: Date.now() }))
@@ -35,7 +36,8 @@ function stub(on: any, posts: string[], opts: { login?: string; password?: strin
         ? [{ name: 's.jsonl', kind: 'file', size: transcript.length, mtimeMs: Date.now(), isLink: false }]
         : [],
   }))
-  on('fs.read', () => ({ value: transcript }))
+  on('fs.write', (_: any, e: any) => { files[e.path] = e.text; return { value: undefined } })
+  on('fs.read', (_: any, e: any) => ({ value: String(e.path).endsWith('team-usage.json') ? files[e.path] ?? '' : transcript }))
   on('http.fetch', (_: any, e: any) => {
     opts.fetches?.push(e)
     if (e.init?.headers?.['x-team-password'] !== password) {
@@ -75,7 +77,7 @@ test('a sync sends only a random id, a name and token totals, never any text', a
   await wait()
   const body = posts[0] ?? '{}'
   const sent = JSON.parse(body)
-  expect(Object.keys(sent).sort()).toEqual(['id', 'name', 'usage'])
+  expect(Object.keys(sent).sort()).toEqual(['id', 'machine', 'name', 'usage'])
   expect(sent.id).toMatch(/^[0-9a-f]{32}$/)
   expect(sent.name).toBe('shivam')
   // m1 appears twice (counted once) and m2 is five days old: 1000+200+100 today, +500+50+100 in the week
@@ -127,4 +129,28 @@ test('/team-usage login saves the login and joins the team', async ($, on) => {
   expect(JSON.stringify(bad)).toContain('Wrong team username or password')
   const good = await $.command.run({ command: 'team-usage', args: 'login teamuser test-only-pass' } as any)
   expect(JSON.stringify(good)).toContain('Signed in')
+})
+
+test('every copy of the mod on one computer is one person (shared id file)', async ($, on) => {
+  const posts: string[] = []
+  const files: Record<string, string> = { '/home/x/.claude/team-usage.json': JSON.stringify({ id: 'f'.repeat(32), name: 'Shivam K' }) }
+  stub(on, posts, { files })
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await wait()
+  const sent = JSON.parse(posts[0] ?? '{}')
+  expect(sent.id).toBe('f'.repeat(32))
+  expect(sent.name).toBe('Shivam K')
+  expect(sent.machine).toMatch(/^[0-9a-f]{16}$/)
+})
+
+test('a first run creates the id file, and a rename updates it', async ($, on) => {
+  const posts: string[] = []
+  const files: Record<string, string> = {}
+  stub(on, posts, { files })
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await wait()
+  const file = '/home/x/.claude/team-usage.json'
+  expect(JSON.parse(files[file] ?? '{}').id).toBe(JSON.parse(posts[0] ?? '{}').id)
+  await $.command.run({ command: 'team-usage', args: 'name Pranav K' } as any)
+  expect(JSON.parse(files[file] ?? '{}').name).toBe('Pranav K')
 })

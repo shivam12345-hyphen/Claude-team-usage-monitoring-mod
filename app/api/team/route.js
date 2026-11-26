@@ -23,7 +23,7 @@ async function handle() {
   for (const [handle, raw] of Object.entries(team)) {
     try {
       const m = JSON.parse(raw);
-      if (now - m.seen < STALE_MS) members.push({ handle, ...m });
+      if (now - m.seen < STALE_MS) members.push({ handle, name: m.name, seen: m.seen, today: m.today, week: m.week, month: m.month });
     } catch {}
   }
   return Response.json({ updated: now, members });
